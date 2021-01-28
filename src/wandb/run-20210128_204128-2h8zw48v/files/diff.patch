@@ -1,0 +1,917 @@
+diff --git a/src/train.ipynb b/src/train.ipynb
+index 65ea904..5f94659 100644
+--- a/src/train.ipynb
++++ b/src/train.ipynb
+@@ -16,7 +16,29 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 303,
++   "execution_count": 1,
++   "metadata": {},
++   "outputs": [
++    {
++     "output_type": "stream",
++     "name": "stdout",
++     "text": [
++      "expname:exp_0_Baseline\n"
++     ]
++    }
++   ],
++   "source": [
++    "PROJECT = \"RFCX\"\n",
++    "EXP_NUM = \"0\"\n",
++    "EXP_TITLE = \"Baseline\"\n",
++    "EXP_NAME = \"exp_\" + EXP_NUM + \"_\" + EXP_TITLE\n",
++    "IS_WRITRE_LOG = True\n",
++    "print('expname:' + EXP_NAME)"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 2,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+@@ -28,8 +50,10 @@
+     "import random\n",
+     "import time\n",
+     "import math\n",
++    "import csv\n",
+     "import torch\n",
+     "import torch.nn as nn\n",
++    "from time import sleep\n",
+     "from torch.nn import functional as F\n",
+     "from torch.optim import Adam, AdamW\n",
+     "from torchvision.models import resnet18, resnet34, resnet50\n",
+@@ -47,12 +71,22 @@
+     "from numpy.random import beta\n",
+     "from pathlib import Path\n",
+     "\n",
++    "from fastprogress.fastprogress import master_bar, progress_bar\n",
++    "\n",
++    "from torchviz import make_dot\n",
++    "\n",
++    "\n",
+     "from conformer import ConformerConvModule\n",
+     "from conformer import ConformerBlock\n",
+     "\n",
+     "from iterstrat.ml_stratifiers import MultilabelStratifiedKFold\n",
+     "from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit\n",
+     "\n",
++    "from torch.utils.tensorboard import SummaryWriter\n",
++    "\n",
++    "import wandb\n",
++    "\n",
++    "\n",
+     "pd.set_option('display.max_columns', 50)\n",
+     "pd.set_option('display.max_rows', 100)\n",
+     "\n"
+@@ -67,7 +101,7 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 137,
++   "execution_count": 3,
+    "metadata": {},
+    "outputs": [
+     {
+@@ -86,14 +120,14 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 138,
++   "execution_count": 4,
+    "metadata": {},
+    "outputs": [
+     {
+      "output_type": "stream",
+      "name": "stdout",
+      "text": [
+-      "torch.Size([2813, 128])\n"
++      "torch.Size([2813, 128])\ntorch.Size([1, 2813, 128])\n"
+      ]
+     }
+    ],
+@@ -101,6 +135,7 @@
+     "# sample data\n",
+     "sample = torch.from_numpy(np.load('melspec.npy'))\n",
+     "print(sample.shape)\n",
++    "print(sample[np.newaxis, :, :].shape)\n",
+     "# channel = sample.unsqueeze(0)\n",
+     "# batch = channel.unsqueeze(0)\n",
+     "# print(batch.shape)"
+@@ -108,32 +143,49 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 310,
++   "execution_count": 11,
+    "metadata": {},
+-   "outputs": [],
++   "outputs": [
++    {
++     "output_type": "stream",
++     "name": "stdout",
++     "text": [
++      "42\n42\n"
++     ]
++    }
++   ],
+    "source": [
+-    "class config:\n",
+-    "    SEED = 42\n",
+-    "    INPUT = Path(\"../input/rfcx-species-audio-detection/train\")\n",
+-    "    TRAIN_AUDIO_ROOT = Path(\"../input/rfcx-species-audio-detection/train_mel\")\n",
+-    "    TEST_AUDIO_ROOT = Path(\"../input/rfcx-species-audio-detection/test_mel\")\n",
+-    "    TRAIN_TP = Path(\"../input/rfcx-species-audio-detection/train_tp.csv\")\n",
+-    "    DIM = sample.shape[1]\n",
+-    "    SEQ_LEN = sample.shape[0]\n",
+-    "    CLASS_NUM = 23\n",
+-    "    KERNEL_SIZE = 3\n",
+-    "    POOL_SIZE = 2\n",
+-    "    POOL_STRIDE = 2\n",
+-    "    NUM_BIRDS = 24\n",
+-    "    N_FOLDS = 5\n",
+-    "    BTCH_NUM = 50\n",
+-    "    EPOCH_NUM = 100\n",
+-    "    lr = 0.001"
++    "params = {\n",
++    "    \"SEED\":               42,\n",
++    "    \"INPUT\":              Path(\"../input/rfcx-species-audio-detection/train\"),\n",
++    "    \"TRAIN_AUDIO_ROOT\":   Path(\"../input/rfcx-species-audio-detection/train_mel\"),\n",
++    "    \"TEST_AUDIO_ROOT\":    Path(\"../input/rfcx-species-audio-detection/test_mel\"),\n",
++    "    \"TRAIN_TP\":           Path(\"../input/rfcx-species-audio-detection/train_tp.csv\"),\n",
++    "    \"SUB\":                Path(\"../input/rfcx-species-audio-detection/sample_submission.csv\"),\n",
++    "    \"DIM\":                sample.shape[1],\n",
++    "    \"SEQ_LEN\":            sample.shape[0],\n",
++    "    \"KERNEL_SIZE\":        3,\n",
++    "    \"POOL_SIZE\":          2,\n",
++    "    \"POOL_STRIDE\":        2,\n",
++    "    \"NUM_BIRDS\":          24,\n",
++    "    \"N_FOLDS\":            5,\n",
++    "    \"BATCH_NUM\":          50,\n",
++    "    \"VALID_BATCH_NUM\":    50,\n",
++    "    \"EPOCH_NUM\":          50,\n",
++    "    \"DROPOUT\":            0.35,\n",
++    "    \"lr\":                 0.0001,\n",
++    "    \"eta_min\":            1e-5,\n",
++    "    \"t_max\":              10,\n",
++    "}\n",
++    "wandb.init(config=params, project=PROJECT, group=EXP_NAME)\n",
++    "config = wandb.config\n",
++    "\n",
++    "print(config.SEED)"
+    ]
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 146,
++   "execution_count": 12,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+@@ -157,7 +209,7 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 125,
++   "execution_count": 13,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+@@ -174,7 +226,7 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": null,
++   "execution_count": 14,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+@@ -189,7 +241,7 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": null,
++   "execution_count": 15,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+@@ -212,7 +264,7 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 151,
++   "execution_count": 16,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+@@ -228,7 +280,7 @@
+     "                                        ((config.DIM - config.KERNEL_SIZE + 1) - config.POOL_SIZE) / config.POOL_STRIDE\n",
+     "                                    ) + 1\n",
+     "                                ), config.DIM)\n",
+-    "        self.dropout = nn.Dropout(0.2)\n",
++    "        self.dropout = nn.Dropout(config.DROPOUT)\n",
+     "        \n",
+     "        self.conformerblock = ConformerBlock(\n",
+     "            dim = config.DIM,\n",
+@@ -237,11 +289,11 @@
+     "            ff_mult = 4,\n",
+     "            conv_expansion_factor = 2,\n",
+     "            conv_kernel_size = 31,\n",
+-    "            attn_dropout = 0.,\n",
+-    "            ff_dropout = 0.,\n",
+-    "            conv_dropout = 0.\n",
++    "            attn_dropout = config.DROPOUT,\n",
++    "            ff_dropout = config.DROPOUT,\n",
++    "            conv_dropout = config.DROPOUT\n",
+     "        )\n",
+-    "        self.decoder = nn.Linear(1 * int((((config.SEQ_LEN - config.KERNEL_SIZE + 1) -  config.POOL_SIZE) / config.POOL_STRIDE) + 1) * config.DIM, config.CLASS_NUM)\n",
++    "        self.decoder = nn.Linear(1 * int((((config.SEQ_LEN - config.KERNEL_SIZE + 1) -  config.POOL_SIZE) / config.POOL_STRIDE) + 1) * config.DIM, config.NUM_BIRDS)\n",
+     "\n",
+     "        # devided by stride\n",
+     "        \n",
+@@ -265,53 +317,83 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 307,
++   "execution_count": 17,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+-    "# LRAP. Instance-level average\n",
+-    "# Assume float preds [BxC], labels [BxC] of 0 or 1\n",
+-    "def LRAP(preds, labels):\n",
+-    "    # Ranks of the predictions\n",
+-    "    ranked_classes = torch.argsort(preds, dim=-1, descending=True)\n",
+-    "    # i, j corresponds to rank of prediction in row i\n",
+-    "    class_ranks = torch.zeros_like(ranked_classes)\n",
+-    "    for i in range(ranked_classes.size(0)):\n",
+-    "        for j in range(ranked_classes.size(1)):\n",
+-    "            class_ranks[i, ranked_classes[i][j]] = j + 1\n",
+-    "    # Mask out to only use the ranks of relevant GT labels\n",
+-    "    ground_truth_ranks = class_ranks * labels + (1e6) * (1 - labels)\n",
+-    "    # All the GT ranks are in front now\n",
+-    "    sorted_ground_truth_ranks, _ = torch.sort(ground_truth_ranks, dim=-1, descending=False)\n",
+-    "    pos_matrix = torch.tensor(np.array([i+1 for i in range(labels.size(-1))])).unsqueeze(0)\n",
+-    "    score_matrix = pos_matrix / sorted_ground_truth_ranks\n",
+-    "    score_mask_matrix, _ = torch.sort(labels, dim=-1, descending=True)\n",
+-    "    scores = score_matrix * score_mask_matrix\n",
+-    "    score = (scores.sum(-1) / labels.sum(-1)).mean()\n",
+-    "    return score.item()\n",
+-    "\n",
+-    "# label-level average\n",
+-    "# Assume float preds [BxC], labels [BxC] of 0 or 1\n",
+-    "def LWLRAP(preds, labels):\n",
+-    "    # Ranks of the predictions\n",
+-    "    ranked_classes = torch.argsort(preds, dim=-1, descending=True)\n",
+-    "    # i, j corresponds to rank of prediction in row i\n",
+-    "    class_ranks = torch.zeros_like(ranked_classes)\n",
+-    "    for i in range(ranked_classes.size(0)):\n",
+-    "        for j in range(ranked_classes.size(1)):\n",
+-    "            class_ranks[i, ranked_classes[i][j]] = j + 1\n",
+-    "    # Mask out to only use the ranks of relevant GT labels\n",
+-    "    ground_truth_ranks = class_ranks * labels + (1e6) * (1 - labels)\n",
+-    "    # All the GT ranks are in front now\n",
+-    "    sorted_ground_truth_ranks, _ = torch.sort(ground_truth_ranks, dim=-1, descending=False)\n",
+-    "    # Number of GT labels per instance\n",
+-    "    num_labels = labels.sum(-1)\n",
+-    "    pos_matrix = torch.tensor(np.array([i+1 for i in range(labels.size(-1))])).unsqueeze(0)\n",
+-    "    score_matrix = pos_matrix / sorted_ground_truth_ranks\n",
+-    "    score_mask_matrix, _ = torch.sort(labels, dim=-1, descending=True)\n",
+-    "    scores = score_matrix * score_mask_matrix\n",
+-    "    score = scores.sum() / labels.sum()\n",
+-    "    return score.item()"
++    "# from official code https://colab.research.google.com/drive/1AgPdhSp7ttY18O3fEoHOQKlt_3HJDLi8#scrollTo=cRCaCIb9oguU\n",
++    "def _one_sample_positive_class_precisions(scores, truth):\n",
++    "    \"\"\"Calculate precisions for each true class for a single sample.\n",
++    "\n",
++    "    Args:\n",
++    "      scores: np.array of (num_classes,) giving the individual classifier scores.\n",
++    "      truth: np.array of (num_classes,) bools indicating which classes are true.\n",
++    "\n",
++    "    Returns:\n",
++    "      pos_class_indices: np.array of indices of the true classes for this sample.\n",
++    "      pos_class_precisions: np.array of precisions corresponding to each of those\n",
++    "        classes.\n",
++    "    \"\"\"\n",
++    "    num_classes = scores.shape[0]\n",
++    "    pos_class_indices = np.flatnonzero(truth > 0)\n",
++    "    # Only calculate precisions if there are some true classes.\n",
++    "    if not len(pos_class_indices):\n",
++    "        return pos_class_indices, np.zeros(0)\n",
++    "    # Retrieval list of classes for this sample.\n",
++    "    retrieved_classes = np.argsort(scores)[::-1]\n",
++    "    # class_rankings[top_scoring_class_index] == 0 etc.\n",
++    "    class_rankings = np.zeros(num_classes, dtype=np.int)\n",
++    "    class_rankings[retrieved_classes] = range(num_classes)\n",
++    "    # Which of these is a true label?\n",
++    "    retrieved_class_true = np.zeros(num_classes, dtype=np.bool)\n",
++    "    retrieved_class_true[class_rankings[pos_class_indices]] = True\n",
++    "    # Num hits for every truncated retrieval list.\n",
++    "    retrieved_cumulative_hits = np.cumsum(retrieved_class_true)\n",
++    "    # Precision of retrieval list truncated at each hit, in order of pos_labels.\n",
++    "    precision_at_hits = (\n",
++    "            retrieved_cumulative_hits[class_rankings[pos_class_indices]] /\n",
++    "            (1 + class_rankings[pos_class_indices].astype(np.float)))\n",
++    "    return pos_class_indices, precision_at_hits\n",
++    "\n",
++    "\n",
++    "def calculate_per_class_lwlrap(truth, scores):\n",
++    "    \"\"\"Calculate label-weighted label-ranking average precision.\n",
++    "\n",
++    "    Arguments:\n",
++    "      truth: np.array of (num_samples, num_classes) giving boolean ground-truth\n",
++    "        of presence of that class in that sample.\n",
++    "      scores: np.array of (num_samples, num_classes) giving the classifier-under-\n",
++    "        test's real-valued score for each class for each sample.\n",
++    "\n",
++    "    Returns:\n",
++    "      per_class_lwlrap: np.array of (num_classes,) giving the lwlrap for each\n",
++    "        class.\n",
++    "      weight_per_class: np.array of (num_classes,) giving the prior of each\n",
++    "        class within the truth labels.  Then the overall unbalanced lwlrap is\n",
++    "        simply np.sum(per_class_lwlrap * weight_per_class)\n",
++    "    \"\"\"\n",
++    "    assert truth.shape == scores.shape\n",
++    "    num_samples, num_classes = scores.shape\n",
++    "    # Space to store a distinct precision value for each class on each sample.\n",
++    "    # Only the classes that are true for each sample will be filled in.\n",
++    "    precisions_for_samples_by_classes = np.zeros((num_samples, num_classes))\n",
++    "    for sample_num in range(num_samples):\n",
++    "        pos_class_indices, precision_at_hits = (\n",
++    "            _one_sample_positive_class_precisions(scores[sample_num, :],\n",
++    "                                                  truth[sample_num, :]))\n",
++    "        precisions_for_samples_by_classes[sample_num, pos_class_indices] = (\n",
++    "            precision_at_hits)\n",
++    "    labels_per_class = np.sum(truth > 0, axis=0)\n",
++    "    weight_per_class = labels_per_class / float(np.sum(labels_per_class))\n",
++    "    # Form average of each column, i.e. all the precisions assigned to labels in\n",
++    "    # a particular class.\n",
++    "    per_class_lwlrap = (np.sum(precisions_for_samples_by_classes, axis=0) /\n",
++    "                        np.maximum(1, labels_per_class))\n",
++    "    # overall_lwlrap = simple average of all the actual per-class, per-sample precisions\n",
++    "    #                = np.sum(precisions_for_samples_by_classes) / np.sum(precisions_for_samples_by_classes > 0)\n",
++    "    #           also = weighted mean of per-class lwlraps, weighted by class label prior across samples\n",
++    "    #                = np.sum(per_class_lwlrap * weight_per_class)\n",
++    "    return per_class_lwlrap, weight_per_class"
+    ]
+   },
+   {
+@@ -323,21 +405,21 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 163,
++   "execution_count": 18,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+     "# transforms\n",
+     "train_transform = transforms.Compose([\n",
+     "    # transforms.RandomCrop((128, 313), pad_if_needed=True, padding_mode=\"constant\"),\n",
+-    "    transforms.ToTensor(),\n",
++    "    # transforms.ToTensor()\n",
+     "])\n",
+     "valid_transform = transforms.Compose([\n",
+     "    # transforms.CenterCrop((128, 313)),\n",
+-    "    transforms.ToTensor()\n",
++    "    # transforms.ToTensor()\n",
+     "])\n",
+     "label_transform = transforms.Compose([\n",
+-    "    transforms.ToTensor()\n",
++    "    # transforms.ToTensor()\n",
+     "])"
+    ]
+   },
+@@ -350,7 +432,7 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 225,
++   "execution_count": 19,
+    "metadata": {},
+    "outputs": [
+     {
+@@ -369,7 +451,7 @@
+       "text/html": "<div>\n<style scoped>\n    .dataframe tbody tr th:only-of-type {\n        vertical-align: middle;\n    }\n\n    .dataframe tbody tr th {\n        vertical-align: top;\n    }\n\n    .dataframe thead th {\n        text-align: right;\n    }\n</style>\n<table border=\"1\" class=\"dataframe\">\n  <thead>\n    <tr style=\"text-align: right;\">\n      <th></th>\n      <th>recording_id</th>\n      <th>species_id</th>\n      <th>songtype_id</th>\n      <th>t_min</th>\n      <th>f_min</th>\n      <th>t_max</th>\n      <th>f_max</th>\n      <th>0</th>\n      <th>1</th>\n      <th>2</th>\n      <th>3</th>\n      <th>4</th>\n      <th>5</th>\n      <th>6</th>\n      <th>7</th>\n      <th>8</th>\n      <th>9</th>\n      <th>10</th>\n      <th>11</th>\n      <th>12</th>\n      <th>13</th>\n      <th>14</th>\n      <th>15</th>\n      <th>16</th>\n      <th>17</th>\n      <th>18</th>\n      <th>19</th>\n      <th>20</th>\n      <th>21</th>\n      <th>22</th>\n      <th>23</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <th>538</th>\n      <td>77299bde7</td>\n      <td>21</td>\n      <td>1</td>\n      <td>42.3787</td>\n      <td>3750.0</td>\n      <td>43.472</td>\n      <td>5531.25</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>1</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>0</td>\n      <td>1</td>\n      <td>0</td>\n      <td>0</td>\n    </tr>\n  </tbody>\n</table>\n</div>"
+      },
+      "metadata": {},
+-     "execution_count": 225
++     "execution_count": 19
+     }
+    ],
+    "source": [
+@@ -396,14 +478,14 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 254,
++   "execution_count": 20,
+    "metadata": {},
+    "outputs": [
+     {
+      "output_type": "stream",
+      "name": "stdout",
+      "text": [
+-      "003bec244\n[0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0]\n"
++      "003bec244\n[0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 1. 0. 0. 0. 0. 0. 0. 0. 0. 0.]\n"
+      ]
+     }
+    ],
+@@ -415,13 +497,15 @@
+     "    record_ids.append(row.values[0])\n",
+     "    labels.append(row.values[7:31])\n",
+     "\n",
++    "labels = np.array(labels).astype(float)\n",
++    "\n",
+     "print(record_ids[0])\n",
+     "print(labels[0])\n"
+    ]
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 268,
++   "execution_count": 21,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+@@ -436,11 +520,14 @@
+     "        for rid in record_ids:\n",
+     "            # read npy\n",
+     "            melspec = np.load(os.path.join(config.TRAIN_AUDIO_ROOT, rid + \".npy\"))\n",
+-    "            melspec = torch.from_numpy(melspec)\n",
+-    "            melspec = melspec.unsqueeze(0) # add channel for first convolution\n",
++    "            # melspec = torch.from_numpy(melspec)\n",
++    "            # melspec = melspec.unsqueeze(0) # add channel for first convolution\n",
++    "            melspec = melspec[np.newaxis, :, :]\n",
+     "            self.dataset.append(melspec)\n",
+     "\n",
++    "        self.dataset = np.array(self.dataset).astype(float)\n",
+     "        self.datanum = len(self.dataset)\n",
++    "        \n",
+     "\n",
+     "    def __len__(self):\n",
+     "        return self.datanum\n",
+@@ -449,95 +536,236 @@
+     "        # get data\n",
+     "        out_label = self.labelset[idx]\n",
+     "        out_data = self.dataset[idx]\n",
++    "\n",
++    "        # print(type(out_label))\n",
+     "        \n",
+     "        # transform label\n",
+-    "        out_data = self.transform(out_data)\n",
+-    "        out_label = label_transform(out_label)\n",
++    "        # out_data = self.transform(out_data)\n",
++    "        # out_label = label_transform(out_label)\n",
++    "\n",
++    "        # print(type(out_data.shape))\n",
++    "        # print(out_label)\n",
++    "\n",
++    "        # print(out_data.shape)\n",
++    "\n",
++    "        out_label = torch.from_numpy(out_label).float()\n",
++    "        out_data = torch.from_numpy(out_data).float()\n",
++    "        # print(type(out_data))\n",
++    "        # print(type(np.array(out_label)))\n",
++    "        # print(out_data.shape)\n",
+     "\n",
+     "        return out_data, out_label"
+    ]
+   },
+   {
+-   "cell_type": "code",
+-   "execution_count": 293,
+-   "metadata": {},
+-   "outputs": [],
+    "source": [
+-    "# skf\n",
+-    "# skf = StratifiedKFold(n_splits=config.N_FOLDS, shuffle=True, random_state=config.SEED)\n",
+-    "msss = MultilabelStratifiedShuffleSplit(n_splits=config.N_FOLDS, test_size=0.2, random_state=config.SEED)"
+-   ]
++    "## Train"
++   ],
++   "cell_type": "markdown",
++   "metadata": {}
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 294,
++   "execution_count": 22,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+-    "# transform\n",
+-    "train_datasets = RainforestDatasets(transform=train_transform)\n",
+-    "valid_datasets = RainforestDatasets(transform=valid_transform)"
++    "# model = RainforestTransformer()\n",
++    "# make_dot(model(), params=dict(model.named_parameters()))"
+    ]
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": null,
++   "execution_count": 17,
+    "metadata": {},
+    "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": 304,
+-   "metadata": {},
+-   "outputs": [
+-    {
+-     "output_type": "stream",
+-     "name": "stdout",
+-     "text": [
+-      "(902,)\n(230,)\n(905,)\n(227,)\n(906,)\n(226,)\n(906,)\n(226,)\n(903,)\n(229,)\n"
+-     ]
+-    }
+-   ],
+    "source": [
+-    "for kfoldidx, (train_index, test_index) in enumerate(msss.split(labels, labels)):\n",
+-    "    X = Subset(train_datasets, train_index)\n",
+-    "    train_dataloader = DataLoader(X, 20, shuffle=True)\n",
++    "def train():\n",
++    "\n",
++    "    # Stratified k-fold\n",
++    "    # skf = StratifiedKFold(n_splits=config.N_FOLDS, shuffle=True, random_state=config.SEED)\n",
++    "    msss = MultilabelStratifiedShuffleSplit(n_splits=config.N_FOLDS, test_size=0.2, random_state=config.SEED)\n",
++    "\n",
++    "    # Read dataset\n",
++    "    train_datasets = RainforestDatasets(transform=train_transform)\n",
++    "    valid_datasets = RainforestDatasets(transform=valid_transform)\n",
++    "\n",
++    "    best_epochs = []\n",
++    "    best_lwlraps = []\n",
++    "    best_lwlrap = 0.\n",
++    "    best_epoch = 0\n",
++    "\n",
++    "    if IS_WRITRE_LOG:\n",
++    "        writer = SummaryWriter(log_dir=\"./logs/\" + EXP_NAME)\n",
++    "\n",
++    "    if IS_WRITRE_LOG:\n",
++    "        sweep_id = wandb.sweep(sweep_config, project=\"Pytorch-sweeps\")\n",
++    "        wandb.init(config=config, project=PROJECT, group=EXP_NAME)\n",
++    "        wandb.watch(model)\n",
++    "\n",
++    "    # k-fold\n",
++    "    for kfoldidx, (train_index, valid_index) in enumerate(msss.split(labels, labels)):\n",
++    "\n",
++    "        # model \n",
++    "        model = RainforestTransformer()\n",
++    "        model.to(device)\n",
++    "\n",
++    "        # criterion\n",
++    "        criterion = nn.BCEWithLogitsLoss().cuda()\n",
++    "\n",
++    "        # optimizer\n",
++    "        optimizer = Adam(params=model.parameters(), lr=config.lr, amsgrad=False)\n",
++    "        # print(optimizer)\n",
++    "\n",
++    "        # scheduler\n",
++    "        scheduler = CosineAnnealingLR(optimizer, T_max=config.t_max, eta_min=config.eta_min)\n",
++    "\n",
++    "        # train\n",
++    "        train_subset = Subset(train_datasets, train_index)\n",
++    "        train_loader = DataLoader(train_subset, batch_size=config.BATCH_NUM, shuffle=True)\n",
++    "\n",
++    "        # validation\n",
++    "        valid_subset = Subset(valid_datasets, valid_index)\n",
++    "        valid_loader = DataLoader(valid_subset, batch_size=config.VALID_BATCH_NUM, shuffle=False)\n",
++    "\n",
++    "        # epoch\n",
++    "        mb = master_bar(range(config.EPOCH_NUM))\n",
++    "        mb.names = ['avg_loss', 'avg_val_loss', 'lwlrap']\n",
++    "\n",
++    "        # Epoch\n",
++    "        for epoch in mb:\n",
++    "\n",
++    "            # start time\n",
++    "            start_time = time.time()\n",
++    "\n",
++    "            # train mode\n",
++    "            model.train()\n",
++    "\n",
++    "            # init loss\n",
++    "            avg_loss = 0.\n",
++    "\n",
++    "            # batch training\n",
++    "            train_batch_preds = []\n",
++    "            train_batch_labels = []\n",
++    "            for x_batch, y_batch in progress_bar(train_loader, parent=mb):\n",
++    "                preds = model(x_batch.to(device))\n",
++    "                loss = criterion(preds, y_batch.to(device)) # It dosen't need Sigmoid, because BCE includes sigmoid function.\n",
++    "\n",
++    "                optimizer.zero_grad()\n",
++    "                loss.backward()\n",
++    "                optimizer.step()\n",
++    "\n",
++    "                avg_loss += loss.item() / len(train_loader)\n",
++    "\n",
++    "                # add preds\n",
++    "                train_batch_preds.extend(preds.detach().cpu().numpy())\n",
++    "                train_batch_labels.extend(np.array(y_batch))\n",
++    "\n",
++    "            # calc score\n",
++    "            score, weight = calculate_per_class_lwlrap(np.array(train_batch_labels), np.array(train_batch_preds))\n",
++    "            train_lwlrap = (score * weight).sum()\n",
++    "\n",
++    "            # validation mode\n",
++    "            model.eval()\n",
++    "            valid_preds = np.zeros((len(valid_index), config.NUM_BIRDS))\n",
++    "            avg_val_loss = 0.\n",
++    "\n",
++    "            # validation\n",
++    "            for i, (x_batch, y_batch) in enumerate(valid_loader):\n",
++    "                preds = model(x_batch.to(device)).detach()\n",
++    "                loss = criterion(preds, y_batch.to(device))\n",
++    "\n",
++    "                preds = torch.sigmoid(preds)\n",
++    "                valid_preds[i * config.VALID_BATCH_NUM: (i+1) * config.VALID_BATCH_NUM] = preds.cpu().numpy()\n",
++    "\n",
++    "                avg_val_loss += loss.item() / len(valid_loader)\n",
++    "\n",
++    "            # calc score\n",
++    "            score, weight = calculate_per_class_lwlrap(labels[valid_index], valid_preds)\n",
++    "            lwlrap = (score * weight).sum()\n",
++    "\n",
++    "            # update lr\n",
++    "            scheduler.step()\n",
++    "\n",
++    "            # tensorboard\n",
++    "            if IS_WRITRE_LOG:\n",
++    "                writer.add_scalar(\"train_loss/fold-\" + str(kfoldidx), avg_loss, epoch)\n",
++    "                writer.add_scalar(\"valid_loss/fold-\" + str(kfoldidx), avg_val_loss, epoch)\n",
++    "                writer.add_scalar(\"train_lwlrap/fold-\" + str(kfoldidx), train_lwlrap, epoch)\n",
++    "                writer.add_scalar(\"valid_lwlrap/fold-\" + str(kfoldidx), lwlrap, epoch)\n",
++    "\n",
++    "            if (epoch + 1) % 5 == 0:\n",
++    "                elapsed = time.time() - start_time\n",
++    "                mb.write(f'Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  val_lwlrap: {lwlrap:.6f}  time: {elapsed:.0f}s')\n",
++    "        \n",
++    "            if lwlrap > best_lwlrap:\n",
++    "                best_epoch = epoch + 1\n",
++    "                best_lwlrap = lwlrap\n",
++    "                torch.save(model.state_dict(), 'weight_best_fold' + str(kfoldidx) +'.pt')\n",
++    "            \n",
++    "        best_epochs.append(best_epoch)\n",
++    "        best_lwlraps.append(best_lwlrap)\n",
++    "\n",
++    "    if IS_WRITRE_LOG:\n",
++    "        writer.close()\n",
++    "    \n",
++    "    return {\n",
++    "        'best_epoch': best_epochs,\n",
++    "        'best_lwlrap': best_lwlraps,\n",
++    "    }\n",
++    "\n",
+     "\n"
+    ]
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 305,
++   "execution_count": 18,
+    "metadata": {},
+    "outputs": [
+     {
+-     "output_type": "execute_result",
++     "output_type": "display_data",
+      "data": {
+-      "text/plain": [
+-       "<torch.utils.data.dataloader.DataLoader at 0x2d9af310370>"
+-      ]
++      "text/plain": "<IPython.core.display.HTML object>",
++      "text/html": "\n    <div>\n        <style>\n            /* Turns off some styling */\n            progress {\n                /* gets rid of default border in Firefox and Opera. */\n                border: none;\n                /* Needs to be in here for Safari polyfill so background images work as expected. */\n                background-size: auto;\n            }\n            .progress-bar-interrupted, .progress-bar-interrupted::-webkit-progress-bar {\n                background: #F44336;\n            }\n        </style>\n      <progress value='0' class='' max='200' style='width:300px; height:20px; vertical-align: middle;'></progress>\n      \n    </div>\n    \n"
+      },
+-     "metadata": {},
+-     "execution_count": 305
++     "metadata": {}
++    },
++    {
++     "output_type": "display_data",
++     "data": {
++      "text/plain": "<IPython.core.display.HTML object>",
++      "text/html": "\n    <div>\n        <style>\n            /* Turns off some styling */\n            progress {\n                /* gets rid of default border in Firefox and Opera. */\n                border: none;\n                /* Needs to be in here for Safari polyfill so background images work as expected. */\n                background-size: auto;\n            }\n            .progress-bar-interrupted, .progress-bar-interrupted::-webkit-progress-bar {\n                background: #F44336;\n            }\n        </style>\n      <progress value='0' class='' max='200' style='width:300px; height:20px; vertical-align: middle;'></progress>\n      \n    </div>\n    \n"
++     },
++     "metadata": {}
++    },
++    {
++     "output_type": "display_data",
++     "data": {
++      "text/plain": "<IPython.core.display.HTML object>",
++      "text/html": "\n    <div>\n        <style>\n            /* Turns off some styling */\n            progress {\n                /* gets rid of default border in Firefox and Opera. */\n                border: none;\n                /* Needs to be in here for Safari polyfill so background images work as expected. */\n                background-size: auto;\n            }\n            .progress-bar-interrupted, .progress-bar-interrupted::-webkit-progress-bar {\n                background: #F44336;\n            }\n        </style>\n      <progress value='0' class='' max='200' style='width:300px; height:20px; vertical-align: middle;'></progress>\n      \n    </div>\n    \n"
++     },
++     "metadata": {}
++    },
++    {
++     "output_type": "display_data",
++     "data": {
++      "text/plain": "<IPython.core.display.HTML object>",
++      "text/html": "\n    <div>\n        <style>\n            /* Turns off some styling */\n            progress {\n                /* gets rid of default border in Firefox and Opera. */\n                border: none;\n                /* Needs to be in here for Safari polyfill so background images work as expected. */\n                background-size: auto;\n            }\n            .progress-bar-interrupted, .progress-bar-interrupted::-webkit-progress-bar {\n                background: #F44336;\n            }\n        </style>\n      <progress value='0' class='' max='200' style='width:300px; height:20px; vertical-align: middle;'></progress>\n      \n    </div>\n    \n"
++     },
++     "metadata": {}
++    },
++    {
++     "output_type": "display_data",
++     "data": {
++      "text/plain": "<IPython.core.display.HTML object>",
++      "text/html": "Epoch 5 - avg_train_loss: 1.8465  avg_val_loss: 1.9017  val_lwlrap: 0.194131  time: 7s<p>Epoch 10 - avg_train_loss: 0.1833  avg_val_loss: 0.1787  val_lwlrap: 0.158356  time: 6s<p>Epoch 15 - avg_train_loss: 0.4251  avg_val_loss: 0.6514  val_lwlrap: 0.157552  time: 6s<p>Epoch 20 - avg_train_loss: 1.4015  avg_val_loss: 2.1030  val_lwlrap: 0.192021  time: 6s<p>Epoch 25 - avg_train_loss: 0.2498  avg_val_loss: 0.2378  val_lwlrap: 0.159752  time: 6s<p>Epoch 30 - avg_train_loss: 0.1782  avg_val_loss: 0.1752  val_lwlrap: 0.196773  time: 6s<p>Epoch 35 - avg_train_loss: 0.1918  avg_val_loss: 0.1957  val_lwlrap: 0.160192  time: 6s<p>Epoch 40 - avg_train_loss: 0.6356  avg_val_loss: 1.0129  val_lwlrap: 0.167979  time: 6s<p>Epoch 45 - avg_train_loss: 0.2037  avg_val_loss: 0.1987  val_lwlrap: 0.159560  time: 6s<p>Epoch 50 - avg_train_loss: 0.1783  avg_val_loss: 0.1751  val_lwlrap: 0.194344  time: 6s<p>Epoch 55 - avg_train_loss: 0.1866  avg_val_loss: 0.1851  val_lwlrap: 0.166045  time: 6s<p>Epoch 60 - avg_train_loss: 0.2688  avg_val_loss: 0.2806  val_lwlrap: 0.147809  time: 6s<p>Epoch 65 - avg_train_loss: 0.2150  avg_val_loss: 0.2066  val_lwlrap: 0.159984  time: 6s<p>Epoch 70 - avg_train_loss: 0.1777  avg_val_loss: 0.1751  val_lwlrap: 0.194575  time: 6s<p>Epoch 75 - avg_train_loss: 0.1885  avg_val_loss: 0.1887  val_lwlrap: 0.192111  time: 6s<p>Epoch 80 - avg_train_loss: 0.2662  avg_val_loss: 0.2422  val_lwlrap: 0.191185  time: 6s<p>Epoch 85 - avg_train_loss: 0.2014  avg_val_loss: 0.1916  val_lwlrap: 0.192454  time: 6s<p>Epoch 90 - avg_train_loss: 0.1772  avg_val_loss: 0.1749  val_lwlrap: 0.195582  time: 6s<p>Epoch 95 - avg_train_loss: 0.1859  avg_val_loss: 0.1834  val_lwlrap: 0.176675  time: 6s<p>Epoch 100 - avg_train_loss: 0.2193  avg_val_loss: 0.2031  val_lwlrap: 0.175386  time: 6s<p>Epoch 105 - avg_train_loss: 0.1963  avg_val_loss: 0.1884  val_lwlrap: 0.159049  time: 6s<p>Epoch 110 - avg_train_loss: 0.1771  avg_val_loss: 0.1749  val_lwlrap: 0.196684  time: 6s<p>Epoch 115 - avg_train_loss: 0.1817  avg_val_loss: 0.1818  val_lwlrap: 0.163095  time: 6s<p>Epoch 120 - avg_train_loss: 0.1968  avg_val_loss: 0.1893  val_lwlrap: 0.161520  time: 6s<p>Epoch 125 - avg_train_loss: 0.1865  avg_val_loss: 0.1822  val_lwlrap: 0.158687  time: 6s<p>Epoch 130 - avg_train_loss: 0.1769  avg_val_loss: 0.1750  val_lwlrap: 0.195566  time: 6s<p>Epoch 135 - avg_train_loss: 0.1827  avg_val_loss: 0.1816  val_lwlrap: 0.192578  time: 6s<p>Epoch 140 - avg_train_loss: 0.1916  avg_val_loss: 0.1917  val_lwlrap: 0.159511  time: 6s<p>Epoch 145 - avg_train_loss: 0.1847  avg_val_loss: 0.1856  val_lwlrap: 0.167616  time: 6s<p>Epoch 150 - avg_train_loss: 0.1762  avg_val_loss: 0.1749  val_lwlrap: 0.195715  time: 6s<p>Epoch 155 - avg_train_loss: 0.1788  avg_val_loss: 0.1778  val_lwlrap: 0.193971  time: 6s<p>Epoch 160 - avg_train_loss: 0.1874  avg_val_loss: 0.1802  val_lwlrap: 0.193561  time: 6s<p>Epoch 165 - avg_train_loss: 0.1813  avg_val_loss: 0.1966  val_lwlrap: 0.154561  time: 6s<p>Epoch 170 - avg_train_loss: 0.1761  avg_val_loss: 0.1748  val_lwlrap: 0.196469  time: 6s<p>Epoch 175 - avg_train_loss: 0.1786  avg_val_loss: 0.1770  val_lwlrap: 0.193016  time: 6s<p>Epoch 180 - avg_train_loss: 0.1832  avg_val_loss: 0.1871  val_lwlrap: 0.163462  time: 6s<p>Epoch 185 - avg_train_loss: 0.1805  avg_val_loss: 0.1816  val_lwlrap: 0.192288  time: 6s<p>Epoch 190 - avg_train_loss: 0.1760  avg_val_loss: 0.1748  val_lwlrap: 0.195792  time: 6s<p>Epoch 195 - avg_train_loss: 0.1771  avg_val_loss: 0.1751  val_lwlrap: 0.194495  time: 6s<p>Epoch 200 - avg_train_loss: 0.1805  avg_val_loss: 0.1819  val_lwlrap: 0.161347  time: 6s"
++     },
++     "metadata": {}
+     }
+    ],
+    "source": [
+-    "train_dataloader"
++    "result = train()\n",
++    "print(result)"
+    ]
+   },
+   {
+@@ -547,63 +775,28 @@
+    "outputs": [],
+    "source": []
+   },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+   {
+    "source": [
+-    "## Train"
++    "## Predict"
+    ],
+    "cell_type": "markdown",
+    "metadata": {}
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 311,
++   "execution_count": 43,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+-    "criterion = nn.BCEWithLogitsLoss().cuda()\n",
+-    "optimizer = Adam(params=model.parameters(), lr=config.lr, amsgrad=False)"
++    "# prediction\n",
++    "models = []\n",
++    "for fold in range(config.N_FOLDS):\n",
++    "    # load network\n",
++    "    model = RainforestTransformer()\n",
++    "    model.load_state_dict(torch.load('weight_best_fold' + str(fold) +'.pt'))\n",
++    "    model.to(device)\n",
++    "    model.eval()\n",
++    "    models.append(model)\n"
+    ]
+   },
+   {
+@@ -615,24 +808,75 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
++   "execution_count": 45,
+    "metadata": {},
+-   "outputs": [],
+-   "source": []
+-  },
+-  {
+-   "cell_type": "code",
+-   "execution_count": null,
+-   "metadata": {},
+-   "outputs": [],
+-   "source": []
++   "outputs": [
++    {
++     "output_type": "stream",
++     "name": "stdout",
++     "text": [
++      "1992\n",
++      "Predicted for 100 of 1993 files\n",
++      "Predicted for 200 of 1993 files\n",
++      "Predicted for 300 of 1993 files\n",
++      "Predicted for 400 of 1993 files\n",
++      "Predicted for 500 of 1993 files\n",
++      "Predicted for 600 of 1993 files\n",
++      "Predicted for 700 of 1993 files\n",
++      "Predicted for 800 of 1993 files\n",
++      "Predicted for 900 of 1993 files\n",
++      "Predicted for 1000 of 1993 files\n",
++      "Predicted for 1100 of 1993 files\n",
++      "Predicted for 1200 of 1993 files\n",
++      "Predicted for 1300 of 1993 files\n",
++      "Predicted for 1400 of 1993 files\n",
++      "Predicted for 1500 of 1993 files\n",
++      "Predicted for 1600 of 1993 files\n",
++      "Predicted for 1700 of 1993 files\n",
++      "Predicted for 1800 of 1993 files\n",
++      "Predicted for 1900 of 1993 files\n"
++     ]
++    }
++   ],
++   "source": [
++    "# write submission\n",
++    "with open('submission.csv', 'w', newline='') as csvfile:\n",
++    "    submission_writer = csv.writer(csvfile, delimiter=',')\n",
++    "    submission_writer.writerow(['recording_id','s0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11',\n",
++    "                               's12','s13','s14','s15','s16','s17','s18','s19','s20','s21','s22','s23'])\n",
++    "    \n",
++    "    test_files = os.listdir(config.TEST_AUDIO_ROOT)\n",
++    "    print(len(test_files))\n",
++    "    \n",
++    "    # Every test file is split on several chunks and prediction is made for each chunk\n",
++    "    for i in range(0, len(test_files)):\n",
++    "        # read data\n",
++    "        X_test = torch.from_numpy(np.load(os.path.join(config.TEST_AUDIO_ROOT, test_files[i])))\n",
++    "        X_test = X_test.unsqueeze(0) # add channel for first convolution\n",
++    "        X_test = X_test.unsqueeze(0) # add batch for network\n",
++    "        X_test = X_test.to(device)\n",
++    "\n",
++    "        # predict\n",
++    "        output_list = []\n",
++    "        for m in models:\n",
++    "            output = m(X_test)\n",
++    "            maxed_output = torch.max(output, dim=0)[0]\n",
++    "            maxed_output = maxed_output.cpu().detach()\n",
++    "            output_list.append(maxed_output)\n",
++    "        avg_maxed_output = torch.mean(torch.stack(output_list), dim=0)\n",
++    "        \n",
++    "        file_id = str.split(test_files[i], '.')[0]\n",
++    "        write_array = [file_id]\n",
++    "        \n",
++    "#         for out in maxed_output:\n",
++    "        for out in avg_maxed_output:\n",
++    "            write_array.append(out.item())\n",
++    "    \n",
++    "        submission_writer.writerow(write_array)\n",
++    "        \n",
++    "        if i % 100 == 0 and i > 0:\n",
++    "            print('Predicted for ' + str(i) + ' of ' + str(len(test_files) + 1) + ' files')"
++   ]
+   },
+   {
+    "cell_type": "code",
