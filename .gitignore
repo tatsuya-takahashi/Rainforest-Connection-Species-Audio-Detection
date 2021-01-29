@@ -1,6 +1,8 @@
 # add by user
 input/
 *.wav
+src/wandb/
+src/logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
