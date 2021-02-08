@@ -7,7 +7,7 @@
 import os
 PROJECT = "RFCX"
 EXP_NUM = "19"
-EXP_TITLE = "InvestigatingOutfoldPrediction"
+EXP_TITLE = "IncreaseBatchAndChangeLR"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -36,6 +36,7 @@ import wandb
 from time import sleep
 from torch.nn import functional as F
 from torch.optim import Adam, AdamW
+import torch_optimizer as toptim
 from torchvision.models import resnet18, resnet34, resnet50
 from torchvision import datasets, transforms
 from torch.utils.data import Dataset, DataLoader
@@ -199,8 +200,12 @@ config = dict2({
     "VALID_BATCH_NUM":    30,
     "EPOCH_NUM":          100,
     "DROPOUT":            0.35,
-    "lr":                 0.001,
-    "eta_min":            1e-5,
+    "lr": 1e-3,
+    "momentum": 0.9,
+    "gamma": 0.7,
+    "betas": (0.9, 0.999),
+    "eps": 1e-8,
+    "weight_decay": 0,
     "t_max":              10,
     "TEST_SIZE":          0.2,
     "MIXUP":              0.5,
@@ -506,7 +511,7 @@ class RainforestValidDatasets(torch.utils.data.Dataset):
 
         #TODO: 11 is magic number, due to change it to conf
         for i in range(11):
-            if i % 2 == 0:
+            if i % 3 == 0:
                 # load melspec(dim, seq_len)
                 melspec =  np.load(os.path.join(config.VALID_AUDIO_ROOT, str(self.ids[idx]) + "_" + str(i) + ".npy"))
                 # add channel
@@ -587,28 +592,28 @@ class RainforestTransformer(nn.Module):
         self.linear = nn.Linear(int((((((config.ENC_DIM - config.KERNEL_SIZE) / config.KERNEL_STRIDE) + 1) - config.POOL_SIZE) / config.POOL_STRIDE) + 1), config.ENC_DIM)
         self.dropout = nn.Dropout(config.DROPOUT)
         
-        # self.conformerblock = ConformerBlock(
-        #     dim = config.ENC_DIM,
-        #     dim_head = 64,
-        #     heads = 8,
-        #     ff_mult = 4,
-        #     conv_expansion_factor = 2,
-        #     conv_kernel_size = 31,
-        #     attn_dropout = config.DROPOUT,
-        #     ff_dropout = config.DROPOUT,
-        #     conv_dropout = config.DROPOUT
-        # )
-        # self.conformerblock2 = ConformerBlock(
-        #     dim = config.ENC_DIM,
-        #     dim_head = 64,
-        #     heads = 8,
-        #     ff_mult = 4,
-        #     conv_expansion_factor = 2,
-        #     conv_kernel_size = 31,
-        #     attn_dropout = config.DROPOUT,
-        #     ff_dropout = config.DROPOUT,
-        #     conv_dropout = config.DROPOUT
-        # )
+        self.conformerblock = ConformerBlock(
+            dim = config.ENC_DIM,
+            dim_head = 64,
+            heads = 8,
+            ff_mult = 4,
+            conv_expansion_factor = 2,
+            conv_kernel_size = 31,
+            attn_dropout = config.DROPOUT,
+            ff_dropout = config.DROPOUT,
+            conv_dropout = config.DROPOUT
+        )
+        self.conformerblock2 = ConformerBlock(
+            dim = config.ENC_DIM,
+            dim_head = 64,
+            heads = 8,
+            ff_mult = 4,
+            conv_expansion_factor = 2,
+            conv_kernel_size = 31,
+            attn_dropout = config.DROPOUT,
+            ff_dropout = config.DROPOUT,
+            conv_dropout = config.DROPOUT
+        )
 
         self.decoder = nn.Linear(1 * int((((((config.ENC_LEN - config.KERNEL_SIZE_SEQ) / config.KERNEL_STRIDE) + 1) -  config.POOL_SIZE) / config.POOL_STRIDE) + 1) * config.ENC_DIM, config.NUM_BIRDS)
 
@@ -626,8 +631,8 @@ class RainforestTransformer(nn.Module):
         h = F.max_pool2d(h, config.POOL_SIZE, stride=config.POOL_STRIDE)
         h = self.linear(h)
         h = h.transpose(0, 1)[0] # transpose batch and channel to delet channel dimension
-        # h = self.conformerblock(h)
-        # h = self.conformerblock2(h)
+        h = self.conformerblock(h)
+        h = self.conformerblock2(h)
         # h = self.conformerblock3(h)
         # h = self.conformerblock4(h)
         # h = self.conformerblock5(h)
@@ -828,7 +833,15 @@ def train():
         criterion = nn.BCEWithLogitsLoss().cuda()
 
         # optimizer
-        optimizer = Adam(params=model.parameters(), lr=config.lr, amsgrad=False)
+        # optimizer = Adam(params=model.parameters(), lr=config.lr, amsgrad=False)
+        optimizer = toptim.RAdam(
+            model.parameters(),
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+        )
+
         # print(optimizer)
 
         # train
@@ -839,11 +852,11 @@ def train():
         valid_subset = Subset(valid_datasets, valid_index)
         valid_loader = DataLoader(valid_subset, batch_size=config.VALID_BATCH_NUM, shuffle=False)
 
-        # scheduler
-        # scheduler = CosineAnnealingLR(optimizer, T_max=config.t_max, eta_min=config.eta_min)
-        num_train_steps = int(len(train_loader) * config.EPOCH_NUM)
-        num_warmup_steps = int(0.1 * config.EPOCH_NUM * len(train_loader))
-        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_train_steps)
+        # # scheduler
+        # # scheduler = CosineAnnealingLR(optimizer, T_max=config.t_max, eta_min=config.eta_min)
+        # num_train_steps = int(len(train_loader) * config.EPOCH_NUM)
+        # num_warmup_steps = int(0.1 * config.EPOCH_NUM * len(train_loader))
+        # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_train_steps)
 
         # epoch
         mb = master_bar(range(config.EPOCH_NUM))
@@ -946,7 +959,7 @@ def train():
             lwlrap = (score * weight).sum()
 
             # update lr
-            scheduler.step()
+            # scheduler.step()
 
             # tensorboard
             if IS_WRITRE_LOG:
@@ -974,6 +987,10 @@ def train():
                 best_lwlrap = lwlrap
                 # torch.save(model.state_dict(), 'weight_best_' + str(EXP_NUM) + '_fold' + str(kfoldidx) +'.pt')
                 torch.save(model.state_dict(), 'weight_best_fold' + str(kfoldidx) +'.pt')
+                np.save('train_batch_preds.csv', np.array(train_batch_preds))
+                np.save('train_batch_labels', np.array(train_batch_labels))
+                np.save('valid_batch_preds.csv', np.array(valid_batch_preds))
+                np.save('valid_batch_labels', np.array(valid_batch_labels))
             
         best_epochs.append(best_epoch)
         best_lwlraps.append(best_lwlrap)
@@ -998,23 +1015,44 @@ result = train()
 print(result)
 
 # %% [markdown]
+# ### Folds Analytics
+
+# %%
+# calc lwlrap
+
+
+# extrct under < 1.0
+
+
+
+# 
+
+
+# %%
+
+
+
+# %%
+
+
+# %% [markdown]
 # ## Submission
 
 # %%
 # prediction
 models = []
 for fold in range(config.N_FOLDS):
-   #  if not fold == 0:
-    # load network
-    print(fold)
-    model = RainforestTransformer()
-    # torch.save(model.state_dict(), 'weight_best_' + str(EXP_NUM) + '_fold' + str(kfoldidx) +'.pt')
-    model.load_state_dict(torch.load('weight_best_fold' + str(fold) +'.pt'))
-    # print('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt')
-    # model.load_state_dict(torch.load('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt'))
-    model.to(device)
-    model.eval()
-    models.append(model)
+    if not fold == 0:
+        # load network
+        print(fold)
+        model = RainforestTransformer()
+        # torch.save(model.state_dict(), 'weight_best_' + str(EXP_NUM) + '_fold' + str(kfoldidx) +'.pt')
+        model.load_state_dict(torch.load('weight_best_fold' + str(fold) +'.pt'))
+        # print('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt')
+        # model.load_state_dict(torch.load('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt'))
+        model.to(device)
+        model.eval()
+        models.append(model)
 
 
 # %%
