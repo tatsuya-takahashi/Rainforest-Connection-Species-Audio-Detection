@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "19"
-EXP_TITLE = "IncreaseBatchAndChangeLR"
+EXP_NUM = "22"
+EXP_TITLE = "ResNetAdas"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -62,6 +62,7 @@ from torchviz import make_dot
 from torchsummary import summary
 from torchlibrosa.augmentation import SpecAugmentation
 import librosa.display
+from resnest.torch import resnest50
 pd.set_option('display.max_columns', 50)
 pd.set_option('display.max_rows', 100)
 
@@ -80,9 +81,9 @@ print(device)
 # %%
 # load weight
 # model_efn = EfficientNet.from_pretrained('efficientnet-b7')
-model_efn = EfficientNet.from_pretrained('efficientnet-b0')
+# model_efn = EfficientNet.from_pretrained('efficientnet-b7')
 # model_efn = EfficientNet.from_pretrained('efficientnet-b4')
-model_efn.to(device); # calculate on cpu
+# model_efn.to(device); # calculate on cpu
 
 
 # %%
@@ -103,10 +104,20 @@ def wav2mel(wavnp):
     )
     melspec = librosa.power_to_db(melspec).astype(np.float32)
 
-    # normalize
-    melspec = melspec - np.min(melspec)
-    melspec = melspec / np.max(melspec)
-    return melspec
+    # # normalize
+    # melspec = melspec - np.min(melspec)
+    # melspec = melspec / np.max(melspec)
+
+    eps=1e-6 # avoid  divided by 0
+    mean = melspec.mean()
+    std = melspec.std()
+    spec_norm = (melspec - mean) / (std + eps)
+    spec_min, spec_max = spec_norm.min(), spec_norm.max()
+    spec_scaled = 255 * (spec_norm - spec_min) / (spec_max - spec_min)
+    spec_scaled = spec_scaled.astype(np.uint8)
+    spec_scaled = np.asarray(spec_scaled)
+
+    return spec_scaled
 
 wavnp = np.load(Path('../input//rfcx-species-audio-detection/train_mel/0.npy'))
 print(wavnp.shape)
@@ -126,29 +137,42 @@ print(clip_len, clip_dim)
 
 
 # %%
-# expeliment
-clip = sample.T
-print("clip", clip.shape)
+# # expeliment
+# clip = sample.T
+# print("clip", clip.shape)
 
-# stacking
-img = torch.from_numpy(np.array([
-        [clip],[clip],[clip]
-    ])).float().transpose(0, 1)
-print("img", img.shape)
+# # stacking
+# img = torch.from_numpy(np.array([
+#         [clip],[clip],[clip]
+#     ])).float().transpose(0, 1)
+# print("img", img.shape)
 
-# encoding
-enc = model_efn.extract_features(img.to(device))
-print("enc", enc.shape)
+# # encoding
+# enc = model_efn.extract_features(img.to(device))
+# print("enc", enc.shape)
 
-enc = enc.detach().cpu()
+# enc = enc.detach().cpu()
 
-# save
-ch = enc.shape[1]
-enc_len = enc.shape[2]
-enc_dim = enc.shape[3]
-print('ch, enc_len, enc_dim', ch, enc_len, enc_dim)
+# # save
+# ch = enc.shape[1]
+# enc_len = enc.shape[2]
+# enc_dim = enc.shape[3]
+# print('ch, enc_len, enc_dim', ch, enc_len, enc_dim)
 
-del enc
+# del enc
+
+ch = 1792
+enc_len = 30
+enc_dim = 10
+
+
+# %%
+def get_model():
+    resnet_model = resnest50(pretrained=True)
+    num_ftrs = resnet_model.fc.in_features
+    resnet_model.fc = nn.Linear(num_ftrs, config.NUM_BIRDS)
+    # resnet_model = resnet_model.to(device)
+    return resnet_model
 
 
 # %%
@@ -196,9 +220,9 @@ config = dict2({
     "POOL_STRIDE":        2,
     "NUM_BIRDS":          24,
     "N_FOLDS":            5,
-    "BATCH_NUM":          30,
-    "VALID_BATCH_NUM":    30,
-    "EPOCH_NUM":          100,
+    "BATCH_NUM":          20,
+    "VALID_BATCH_NUM":    20,
+    "EPOCH_NUM":          30,
     "DROPOUT":            0.35,
     "lr": 1e-3,
     "momentum": 0.9,
@@ -208,8 +232,8 @@ config = dict2({
     "weight_decay": 0,
     "t_max":              10,
     "TEST_SIZE":          0.2,
-    "MIXUP":              0.5,
-    "MIXUP_PROB":         1.0,
+    "MIXUP":              0.0,
+    "MIXUP_PROB":         -1,
     "SPEC_PROB":          -1,
     "spec_time_w":        0,
     "spec_time_stripes":  0,
@@ -237,42 +261,42 @@ spec_augmenter = SpecAugmentation(time_drop_width=config.spec_time_w, time_strip
 
 
 # %%
-print(img.shape)
-print(spec_augmenter(img).shape)
+# print(img.shape)
+# print(spec_augmenter(img).shape)
 
 
 # %%
-# stacking
-img = torch.from_numpy(np.array([
-        [clip],[clip],[clip]
-    ])).float().transpose(0, 1)
+# # stacking
+# img = torch.from_numpy(np.array([
+#         [clip],[clip],[clip]
+#     ])).float().transpose(0, 1)
 
-print(img.shape)
+# print(img.shape)
 
 
-s_img = spec_augmenter(img)
+# s_img = spec_augmenter(img)
 
-fig, ax = plt.subplots(figsize=(15, 5))
-figure1ch = librosa.display.specshow(
-    s_img.numpy()[0][0].T, 
-    sr=48000,
-    x_axis='time', 
-    y_axis='linear', 
-    ax=ax)
-fig, ax = plt.subplots(figsize=(15, 5))
-figure2ch = librosa.display.specshow(
-    s_img.numpy()[0][1].T, 
-    sr=48000,
-    x_axis='time', 
-    y_axis='linear', 
-    ax=ax)
-fig, ax = plt.subplots(figsize=(15, 5))
-figure3ch = librosa.display.specshow(
-    s_img.numpy()[0][2].T, 
-    sr=48000,
-    x_axis='time', 
-    y_axis='linear', 
-    ax=ax)
+# fig, ax = plt.subplots(figsize=(15, 5))
+# figure1ch = librosa.display.specshow(
+#     s_img.numpy()[0][0].T, 
+#     sr=48000,
+#     x_axis='time', 
+#     y_axis='linear', 
+#     ax=ax)
+# fig, ax = plt.subplots(figsize=(15, 5))
+# figure2ch = librosa.display.specshow(
+#     s_img.numpy()[0][1].T, 
+#     sr=48000,
+#     x_axis='time', 
+#     y_axis='linear', 
+#     ax=ax)
+# fig, ax = plt.subplots(figsize=(15, 5))
+# figure3ch = librosa.display.specshow(
+#     s_img.numpy()[0][2].T, 
+#     sr=48000,
+#     x_axis='time', 
+#     y_axis='linear', 
+#     ax=ax)
 
 # %% [markdown]
 # ## Augment
@@ -474,7 +498,6 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
         # load wav
         wavnp = np.load(Path('../input//rfcx-species-audio-detection/train_mel/' + str(self.ids[idx]) + '.npy'))
         if randomCropOffset >= 0:
-            
             wavnp = wavnp[0 + randomCropOffset: (10 * params.sr) + randomCropOffset]
         else:
             wavnp = wavnp[len(wavnp) - (10 * params.sr) + randomCropOffset : len(wavnp) + randomCropOffset]
@@ -487,7 +510,7 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
         wavnp = np.stack([wavnp, wavnp, wavnp])
 
         # to Tensor
-        wavTensor = torch.from_numpy(wavnp)
+        wavTensor = torch.from_numpy(wavnp).float()
 
         return wavTensor, out_label
 
@@ -499,6 +522,8 @@ class RainforestValidDatasets(torch.utils.data.Dataset):
         self.labels = labels
         self.ids = ids     
         self.datanum = len(labels)   
+        self.record_ids = record_ids
+        self.offsets = offsets
 
     def __len__(self):
         return self.datanum
@@ -507,21 +532,59 @@ class RainforestValidDatasets(torch.utils.data.Dataset):
         # get data
         out_label = self.labels[idx]
 
-        outdatas = []
+        # random crop
+        randomCropOffset = int((int(np.random.rand() * self.offsets[idx])))
 
-        #TODO: 11 is magic number, due to change it to conf
-        for i in range(11):
-            if i % 3 == 0:
-                # load melspec(dim, seq_len)
-                melspec =  np.load(os.path.join(config.VALID_AUDIO_ROOT, str(self.ids[idx]) + "_" + str(i) + ".npy"))
-                # add channel
-                melspec = np.stack([melspec.T, melspec.T, melspec.T])
-                outdatas.append(melspec)
+        # load wav
+        wavnp = np.load(Path('../input//rfcx-species-audio-detection/train_mel/' + str(self.ids[idx]) + '.npy'))
+        if randomCropOffset >= 0:
+            wavnp = wavnp[0 + randomCropOffset: (10 * params.sr) + randomCropOffset]
+        else:
+            wavnp = wavnp[len(wavnp) - (10 * params.sr) + randomCropOffset : len(wavnp) + randomCropOffset]
+        wavnp = wav2mel(wavnp) # 10s clipping
 
-        # list 2 tochtensor(batch, channel, seq_len, dim)
-        outdatas = torch.from_numpy(np.array(outdatas))
+        # dim, seq_len => seq_len, dim
+        wavnp = wavnp.T
 
-        return outdatas, out_label
+        # add channel
+        wavnp = np.stack([wavnp, wavnp, wavnp])
+
+        # to Tensor
+        wavTensor = torch.from_numpy(wavnp).float()
+
+        return wavTensor, out_label
+
+
+# %%
+# # in: idx, out: batch(valid), label(s)
+# class RainforestValidDatasets(torch.utils.data.Dataset):
+#     def __init__(self):
+#         self.labels = labels
+#         self.ids = ids     
+#         self.datanum = len(labels)   
+
+#     def __len__(self):
+#         return self.datanum
+
+#     def __getitem__(self, idx):
+#         # get data
+#         out_label = self.labels[idx]
+
+#         outdatas = []
+
+#         #TODO: 11 is magic number, due to change it to conf
+#         for i in range(11):
+#             if i % 3 == 0:
+#                 # load melspec(dim, seq_len)
+#                 melspec =  np.load(os.path.join(config.VALID_AUDIO_ROOT, str(self.ids[idx]) + "_" + str(i) + ".npy"))
+#                 # add channel
+#                 melspec = np.stack([melspec.T, melspec.T, melspec.T])
+#                 outdatas.append(melspec)
+
+#         # list 2 tochtensor(batch, channel, seq_len, dim)
+#         outdatas = torch.from_numpy(np.array(outdatas))
+
+#         return outdatas, out_label
 
 # %% [markdown]
 # ## Check Data
@@ -580,66 +643,70 @@ class RainforestValidDatasets(torch.utils.data.Dataset):
 # ## Modeling
 
 # %%
-# Conformer
-# https://arxiv.org/abs/2005.08100
-class RainforestTransformer(nn.Module):
-    def __init__(self):
-        super(RainforestTransformer, self).__init__()         
+# # Conformer
+# # https://arxiv.org/abs/2005.08100
+# class RainforestTransformer(nn.Module):
+#     def __init__(self):
+#         super(RainforestTransformer, self).__init__()         
 
-        self.encoding = model_efn
-        # self.pointwise = nn.Conv2d(config.ENC_CH, 1, (1, 1))
-        self.conv = nn.Conv2d(config.ENC_CH, 1, (config.KERNEL_SIZE_SEQ, config.KERNEL_SIZE), stride=config.KERNEL_STRIDE)
-        self.linear = nn.Linear(int((((((config.ENC_DIM - config.KERNEL_SIZE) / config.KERNEL_STRIDE) + 1) - config.POOL_SIZE) / config.POOL_STRIDE) + 1), config.ENC_DIM)
-        self.dropout = nn.Dropout(config.DROPOUT)
+#         self.encoding = model_efn
+#         # self.pointwise = nn.Conv2d(config.ENC_CH, 1, (1, 1))
+#         self.conv = nn.Conv2d(config.ENC_CH, 1, (config.KERNEL_SIZE_SEQ, config.KERNEL_SIZE), stride=config.KERNEL_STRIDE)
+#         self.linear = nn.Linear(int((((((config.ENC_DIM - config.KERNEL_SIZE) / config.KERNEL_STRIDE) + 1) - config.POOL_SIZE) / config.POOL_STRIDE) + 1), config.ENC_DIM)
+#         self.dropout = nn.Dropout(config.DROPOUT)
         
-        self.conformerblock = ConformerBlock(
-            dim = config.ENC_DIM,
-            dim_head = 64,
-            heads = 8,
-            ff_mult = 4,
-            conv_expansion_factor = 2,
-            conv_kernel_size = 31,
-            attn_dropout = config.DROPOUT,
-            ff_dropout = config.DROPOUT,
-            conv_dropout = config.DROPOUT
-        )
-        self.conformerblock2 = ConformerBlock(
-            dim = config.ENC_DIM,
-            dim_head = 64,
-            heads = 8,
-            ff_mult = 4,
-            conv_expansion_factor = 2,
-            conv_kernel_size = 31,
-            attn_dropout = config.DROPOUT,
-            ff_dropout = config.DROPOUT,
-            conv_dropout = config.DROPOUT
-        )
+#         self.conformerblock = ConformerBlock(
+#             dim = config.ENC_DIM,
+#             dim_head = 64,
+#             heads = 8,
+#             ff_mult = 4,
+#             conv_expansion_factor = 2,
+#             conv_kernel_size = 31,
+#             attn_dropout = config.DROPOUT,
+#             ff_dropout = config.DROPOUT,
+#             conv_dropout = config.DROPOUT
+#         )
+#         self.conformerblock2 = ConformerBlock(
+#             dim = config.ENC_DIM,
+#             dim_head = 64,
+#             heads = 8,
+#             ff_mult = 4,
+#             conv_expansion_factor = 2,
+#             conv_kernel_size = 31,
+#             attn_dropout = config.DROPOUT,
+#             ff_dropout = config.DROPOUT,
+#             conv_dropout = config.DROPOUT
+#         )
 
-        self.decoder = nn.Linear(1 * int((((((config.ENC_LEN - config.KERNEL_SIZE_SEQ) / config.KERNEL_STRIDE) + 1) -  config.POOL_SIZE) / config.POOL_STRIDE) + 1) * config.ENC_DIM, config.NUM_BIRDS)
+#         self.decoder = nn.Linear(1 * int((((((config.ENC_LEN - config.KERNEL_SIZE_SEQ) / config.KERNEL_STRIDE) + 1) -  config.POOL_SIZE) / config.POOL_STRIDE) + 1) * config.ENC_DIM, config.NUM_BIRDS)
 
-        # devided by stride
+#         # devided by stride
     
-    # x: (b, c, seqlen, dim)
-    def forward(self, x):
-        # (b, c, seqlen, dim) => (b, c, seqlen, dim)
-        x = self.encoding.extract_features(x)
-        # enc = self.pointwise(enc)
+#     # x: (b, c, seqlen, dim)
+#     def forward(self, x):
+#         # (b, c, seqlen, dim) => (b, c, seqlen, dim)
+#         x = self.encoding.extract_features(x)
+#         # enc = self.pointwise(enc)
 
-        # (b, c, seqlen, dim) <= encoded matrix
-        # point-wise convokution for convolution channel.
-        h = F.relu(self.conv(x))
-        h = F.max_pool2d(h, config.POOL_SIZE, stride=config.POOL_STRIDE)
-        h = self.linear(h)
-        h = h.transpose(0, 1)[0] # transpose batch and channel to delet channel dimension
-        h = self.conformerblock(h)
-        h = self.conformerblock2(h)
-        # h = self.conformerblock3(h)
-        # h = self.conformerblock4(h)
-        # h = self.conformerblock5(h)
-        # h = self.conformerblock6(h)
-        h = h.view(-1, 1 * int((((((config.ENC_LEN - config.KERNEL_SIZE_SEQ) / config.KERNEL_STRIDE) + 1) -  config.POOL_SIZE) / config.POOL_STRIDE) + 1) * config.ENC_DIM)
-        out = self.decoder(h)
-        return out
+#         # (b, c, seqlen, dim) <= encoded matrix
+#         # point-wise convokution for convolution channel.
+#         h = F.relu(self.conv(x))
+#         h = F.max_pool2d(h, config.POOL_SIZE, stride=config.POOL_STRIDE)
+#         h = self.linear(h)
+#         h = h.transpose(0, 1)[0] # transpose batch and channel to delet channel dimension
+#         h = self.conformerblock(h)
+#         h = self.conformerblock2(h)
+#         # h = self.conformerblock3(h)
+#         # h = self.conformerblock4(h)
+#         # h = self.conformerblock5(h)
+#         # h = self.conformerblock6(h)
+#         h = h.view(-1, 1 * int((((((config.ENC_LEN - config.KERNEL_SIZE_SEQ) / config.KERNEL_STRIDE) + 1) -  config.POOL_SIZE) / config.POOL_STRIDE) + 1) * config.ENC_DIM)
+#         out = self.decoder(h)
+#         return out
+
+
+# %%
+
 
 
 # %%
@@ -679,7 +746,7 @@ def _one_sample_positive_class_precisions(scores, truth):
 
     Args:
       scores: np.array of (num_classes,) giving the individual classifier scores.
-      truth: np.array of (num_classes,) bools indicating which classes are true.
+      truth: np.array of (num_classes,) bools indiscating which classes are true.
 
     Returns:
       pos_class_indices: np.array of indices of the true classes for this sample.
@@ -813,9 +880,17 @@ def train():
     # for kfoldidx, (train_index, valid_index) in enumerate(msss.split(labels, labels)):
     for kfoldidx, (train_index, valid_index) in enumerate(skf.split(specIds, specIds)):
 
-        # model 
-        model = RainforestTransformer()
+        # # model 
+        # model = RainforestTransformer()
+        # model.to(device)
+        # model = EfficientNet.from_pretrained('efficientnet-b0')
+        model = get_model()
+        # num_ftrs = model._fc.in_features
+        # model._fc = nn.Linear(num_ftrs, config.NUM_BIRDS)
         model.to(device)
+
+        np.save('train_index_fold_' + str(kfoldidx), np.array(train_index))
+        np.save('valid_index_fold_' + str(kfoldidx), np.array(valid_index))
 
         # init
         best_lwlrap = 0.
@@ -932,16 +1007,17 @@ def train():
                 # x_batch's shape (batch, devide length(i.e. 51), channel, seq_len, dim)
                 # extract column
 
-                wholeclip_preds = []
+                # wholeclip_preds = []
             
-                for divnum in range(x_batch.shape[1]):
-                    x_batch_divided = x_batch[:, divnum, :, :]
-                    preds = model(x_batch_divided.to(device)).detach() # (batch, species_id)
-                    wholeclip_preds.append(preds.cpu().numpy().tolist()) # (divnum, batch, species_id)
+                # for divnum in range(x_batch.shape[1]):
+                #     x_batch_divided = x_batch[:, divnum, :, :]
+                #     preds = model(x_batch_divided.to(device)).detach() # (batch, species_id)
+                #     wholeclip_preds.append(preds.cpu().numpy().tolist()) # (divnum, batch, species_id)
 
-                # get max via divnum
-                # (batch, preds_dimention)
-                preds = torch.max(torch.from_numpy(np.array(wholeclip_preds)).float(), dim=0).values
+                # # get max via divnum
+                # # (batch, preds_dimention)
+                # preds = torch.max(torch.from_numpy(np.array(wholeclip_preds)).float(), dim=0).values
+                preds = model(x_batch.to(device)).detach() # (batch, species_id)
 
                 # preds = model(x_batch.to(device)).detach()
                 loss = criterion(preds.to(device), y_batch.to(device))
@@ -982,15 +1058,15 @@ def train():
                 elapsed = time.time() - start_time
                 mb.write(f'Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f} train_lwlrap: {train_lwlrap:.6f}  val_lwlrap: {lwlrap:.6f}  time: {elapsed:.0f}s')
         
-            if lwlrap > best_lwlrap and epoch > 50:
+            if lwlrap > best_lwlrap and epoch > 10:
                 best_epoch = epoch + 1
                 best_lwlrap = lwlrap
                 # torch.save(model.state_dict(), 'weight_best_' + str(EXP_NUM) + '_fold' + str(kfoldidx) +'.pt')
                 torch.save(model.state_dict(), 'weight_best_fold' + str(kfoldidx) +'.pt')
-                np.save('train_batch_preds.csv', np.array(train_batch_preds))
-                np.save('train_batch_labels', np.array(train_batch_labels))
-                np.save('valid_batch_preds.csv', np.array(valid_batch_preds))
-                np.save('valid_batch_labels', np.array(valid_batch_labels))
+                np.save('train_batch_preds_' + str(kfoldidx), np.array(train_batch_preds))
+                np.save('train_batch_labels_' + str(kfoldidx), np.array(train_batch_labels))
+                np.save('valid_batch_preds_' + str(kfoldidx), np.array(valid_batch_preds))
+                np.save('valid_batch_labels_' + str(kfoldidx), np.array(valid_batch_labels))
             
         best_epochs.append(best_epoch)
         best_lwlraps.append(best_lwlrap)
@@ -1019,13 +1095,25 @@ print(result)
 
 # %%
 # calc lwlrap
-
-
+train_batch_labels = np.load("./train_batch_labels.npy")
+train_batch_preds = np.load("./train_batch_preds.csv.npy")
 # extrct under < 1.0
-
+valid_batch_labels = np.load("./valid_batch_labels.npy")
+valid_batch_preds = np.load("./valid_batch_preds.csv.npy")
 
 
 # 
+print(train_batch_labels.shape)
+print(train_batch_labels[0])
+
+print(train_batch_preds.shape)
+print(train_batch_preds[0])
+
+print(valid_batch_labels.shape)
+print(valid_batch_labels[0])
+
+print(valid_batch_preds.shape)
+print(valid_batch_preds[0])
 
 
 # %%
@@ -1042,17 +1130,22 @@ print(result)
 # prediction
 models = []
 for fold in range(config.N_FOLDS):
-    if not fold == 0:
-        # load network
-        print(fold)
-        model = RainforestTransformer()
-        # torch.save(model.state_dict(), 'weight_best_' + str(EXP_NUM) + '_fold' + str(kfoldidx) +'.pt')
-        model.load_state_dict(torch.load('weight_best_fold' + str(fold) +'.pt'))
-        # print('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt')
-        # model.load_state_dict(torch.load('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt'))
-        model.to(device)
-        model.eval()
-        models.append(model)
+   #  if not fold == 0:
+    # load network
+    print(fold)
+   #  model = RainforestTransformer()
+   #  model = EfficientNet.from_pretrained('efficientnet-b0')
+    model = get_model()
+    # num_ftrs = model._fc.in_features
+    # model._fc = nn.Linear(num_ftrs, config.NUM_BIRDS)
+
+    # torch.save(model.state_dict(), 'weight_best_' + str(EXP_NUM) + '_fold' + str(kfoldidx) +'.pt')
+    model.load_state_dict(torch.load('weight_best_fold' + str(fold) +'.pt'))
+    # print('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt')
+    # model.load_state_dict(torch.load('weight_best_' + str(EXP_NUM) + '_fold' + str(fold) +'.pt'))
+    model.to(device)
+    model.eval()
+    models.append(model)
 
 
 # %%
@@ -1077,7 +1170,7 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
 
         # muptiply number
         # TODO: 51 is magic number. You have to rewrite 51 to vars.
-        dev_num = 51
+        dev_num = 6
 
         # Cutting!
         for idx in range(dev_num):
@@ -1120,6 +1213,10 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
 
         
 print('finished!')
+
+
+# %%
+
 
 
 # %%
