@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "23"
-EXP_TITLE = "ResNetRADA"
+EXP_NUM = "24"
+EXP_TITLE = "BCE_MiniEpoch_Aug"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -221,9 +221,9 @@ config = dict2({
     "POOL_STRIDE":        2,
     "NUM_BIRDS":          24,
     "N_FOLDS":            5,
-    "BATCH_NUM":          22,
-    "VALID_BATCH_NUM":    22,
-    "EPOCH_NUM":          30,
+    "BATCH_NUM":          20,
+    "VALID_BATCH_NUM":    20,
+    "EPOCH_NUM":          100,
     "DROPOUT":            0.35,
     "lr": 2e-4,
     "momentum": 0.9,
@@ -477,6 +477,10 @@ print('offset', offsets[584] / params.sr)
 
 
 # %%
+np.ndarray.argmax(labels[1])
+
+
+# %%
 # in: idx, out: batch(valid), label(s)
 class RainforestTrainDatasets(torch.utils.data.Dataset):
     def __init__(self):
@@ -514,6 +518,7 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
         wavTensor = torch.from_numpy(wavnp).float()
 
         return wavTensor, out_label
+        # return wavTensor, np.ndarray.argmax(out_label)
 
 
 # %%
@@ -554,6 +559,7 @@ class RainforestValidDatasets(torch.utils.data.Dataset):
         wavTensor = torch.from_numpy(wavnp).float()
 
         return wavTensor, out_label
+        # return wavTensor, np.ndarray.argmax(out_label)
 
 
 # %%
@@ -1035,19 +1041,20 @@ def train():
 
         # criterion
         print('wandb init2')
-        criterion = nn.BCEWithLogitsLoss().cuda()
+        # criterion = nn.BCEWithLogitsLoss().cuda()
+        criterion = nn.CrossEntropyLoss().cuda()
 
         # optimizer
         # optimizer = Adam(params=model.parameters(), lr=config.lr, amsgrad=False)
-        # optimizer = toptim.RAdam(
-        #     model.parameters(),
-        #     lr=config.lr,
-        #     betas=config.betas,
-        #     eps=config.eps,
-        #     weight_decay=config.weight_decay,
-        # )
-        optimizer = Adas(model.parameters(), lr=config.lr)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3)
+        optimizer = toptim.RAdam(
+            model.parameters(),
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+        )
+        # optimizer = Adas(model.parameters(), lr=config.lr)
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3)
 
         # print(optimizer)
 
@@ -1101,10 +1108,12 @@ def train():
                 # forward
                 preds = model(x_batch.to(device))
 
-                if dice < config.MIXUP_PROB:
-                    loss = mixup_criterion(criterion, preds, y_batch.to(device), y_batch_b.to(device), lam)
-                else:
-                    loss = criterion(preds, y_batch.to(device)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
+                # if dice < config.MIXUP_PROB:
+                #     loss = mixup_criterion(criterion, preds, y_batch.to(device), y_batch_b.to(device), lam)
+                # else:
+                #     loss = criterion(preds, y_batch.to(device)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
+
+                loss = criterion(preds, torch.max(y_batch, dim=1).indices.to(device, dtype=torch.long)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -1152,7 +1161,7 @@ def train():
                 preds = model(x_batch.to(device)).detach() # (batch, species_id)
 
                 # preds = model(x_batch.to(device)).detach()
-                loss = criterion(preds.to(device), y_batch.to(device))
+                loss = criterion(preds.to(device), torch.max(y_batch, dim=1).indices.to(device, dtype=torch.long))
 
                 preds = torch.sigmoid(preds)
                 # valid_preds[i * config.VALID_BATCH_NUM: (i+1) * config.VALID_BATCH_NUM] = preds.cpu().numpy()
@@ -1168,7 +1177,7 @@ def train():
 
             # update lr
             # scheduler.step()
-            scheduler.step(avg_val_loss)
+            # scheduler.step(avg_val_loss)
 
             # tensorboard
             if IS_WRITRE_LOG:
@@ -1349,7 +1358,23 @@ print('finished!')
 
 
 # %%
+print(9)
 
+
+# %%
+target = torch.empty(3, dtype=torch.long).random_(5)
+target
+
+
+# %%
+input = torch.randn(3, 5, requires_grad=True)
+input
+
+
+# %%
+a = torch.randn(3, 5)
+print(a)
+torch.max(a, dim=1).indices
 
 
 # %%
