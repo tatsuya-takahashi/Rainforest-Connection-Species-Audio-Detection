@@ -7,7 +7,7 @@
 import os
 PROJECT = "RFCX"
 EXP_NUM = "24"
-EXP_TITLE = "BCE_MiniEpoch_Aug"
+EXP_TITLE = "BCE_NOAUG_MixUP"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -223,7 +223,7 @@ config = dict2({
     "N_FOLDS":            5,
     "BATCH_NUM":          20,
     "VALID_BATCH_NUM":    20,
-    "EPOCH_NUM":          100,
+    "EPOCH_NUM":          30,
     "DROPOUT":            0.35,
     "lr": 2e-4,
     "momentum": 0.9,
@@ -331,7 +331,105 @@ def mixup_criterion(criterion, pred, y_a, y_b, lam):
 
 
 # %%
+class AudioTransform:
+    def __init__(self, always_apply=False, p=0.5):
+        self.always_apply = always_apply
+        self.p = p
 
+    def __call__(self, y: np.ndarray):
+        if self.always_apply:
+            return self.apply(y)
+        else:
+            if np.random.rand() < self.p:
+                return self.apply(y)
+            else:
+                return y
+
+    def apply(self, y: np.ndarray):
+        raise NotImplementedError
+
+
+class Compose:
+    def __init__(self, transforms: list):
+        self.transforms = transforms
+
+    def __call__(self, y: np.ndarray):
+        for trns in self.transforms:
+            y = trns(y)
+        return y
+
+
+class OneOf:
+    def __init__(self, transforms: list):
+        self.transforms = transforms
+
+    def __call__(self, y: np.ndarray):
+        n_trns = len(self.transforms)
+        trns_idx = np.random.choice(n_trns)
+        trns = self.transforms[trns_idx]
+        return trns(y)
+
+
+# %%
+import colorednoise as cn
+
+class PinkNoiseSNR(AudioTransform):
+    def __init__(self, always_apply=False, p=0.5, min_snr=5.0, max_snr=20.0, **kwargs):
+        super().__init__(always_apply, p)
+
+        self.min_snr = min_snr
+        self.max_snr = max_snr
+
+    def apply(self, y: np.ndarray, **params):
+        snr = np.random.uniform(self.min_snr, self.max_snr)
+        a_signal = np.sqrt(y ** 2).max()
+        a_noise = a_signal / (10 ** (snr / 20))
+
+        pink_noise = cn.powerlaw_psd_gaussian(1, len(y))
+        a_pink = np.sqrt(pink_noise ** 2).max()
+        augmented = (y + pink_noise * 1 / a_pink * a_noise).astype(y.dtype)
+        return augmented
+
+
+# %%
+class PitchShift(AudioTransform):
+    def __init__(self, always_apply=False, p=0.5, max_steps=5, sr=32000):
+        super().__init__(always_apply, p)
+
+        self.max_steps = max_steps
+        self.sr = sr
+
+    def apply(self, y: np.ndarray, **params):
+        n_steps = np.random.randint(-self.max_steps, self.max_steps)
+        augmented = librosa.effects.pitch_shift(y, sr=self.sr, n_steps=n_steps)
+        return augmented
+
+
+# %%
+class VolumeControl(AudioTransform):
+    def __init__(self, always_apply=False, p=0.5, db_limit=10, mode="uniform"):
+        super().__init__(always_apply, p)
+
+        assert mode in ["uniform", "fade", "fade", "cosine", "sine"],             "`mode` must be one of 'uniform', 'fade', 'cosine', 'sine'"
+
+        self.db_limit= db_limit
+        self.mode = mode
+
+    def apply(self, y: np.ndarray, **params):
+        db = np.random.uniform(-self.db_limit, self.db_limit)
+        if self.mode == "uniform":
+            db_translated = 10 ** (db / 20)
+        elif self.mode == "fade":
+            lin = np.arange(len(y))[::-1] / (len(y) - 1)
+            db_translated = 10 ** (db * lin / 20)
+        elif self.mode == "cosine":
+            cosine = np.cos(np.arange(len(y)) / len(y) * np.pi * 2)
+            db_translated = 10 ** (db * cosine / 20)
+        else:
+            sine = np.sin(np.arange(len(y)) / len(y) * np.pi * 2)
+            db_translated = 10 ** (db * sine / 20)
+        augmented = y * db_translated
+        return augmented
 
 
 # %%
@@ -343,8 +441,9 @@ def mixup_criterion(criterion, pred, y_a, y_b, lam):
 # %%
 # transforms
 train_transform = transforms.Compose([
-    # transforms.RandomCrop((config.mel, config.CLIP_LEN)),
-    # transforms.ToTensor()
+  PinkNoiseSNR(min_snr=10, always_apply=False, p=0.5),
+  # PitchShift(max_steps=2, sr=params.sr, always_apply=False, p=0.3),
+  # VolumeControl(mode="sine", always_apply=False, p=0.3)
 ])
 valid_transform = transforms.Compose([
     # transforms.CenterCrop((config.mel, config.CLIP_LEN)),
@@ -502,6 +601,10 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
 
         # load wav
         wavnp = np.load(Path('../input//rfcx-species-audio-detection/train_mel/' + str(self.ids[idx]) + '.npy'))
+
+        # transform
+        wavnp = train_transform(wavnp)
+        
         if randomCropOffset >= 0:
             wavnp = wavnp[0 + randomCropOffset: (10 * params.sr) + randomCropOffset]
         else:
@@ -1041,8 +1144,8 @@ def train():
 
         # criterion
         print('wandb init2')
-        # criterion = nn.BCEWithLogitsLoss().cuda()
-        criterion = nn.CrossEntropyLoss().cuda()
+        criterion = nn.BCEWithLogitsLoss().cuda()
+        # criterion = nn.CrossEntropyLoss().cuda()
 
         # optimizer
         # optimizer = Adam(params=model.parameters(), lr=config.lr, amsgrad=False)
@@ -1113,7 +1216,8 @@ def train():
                 # else:
                 #     loss = criterion(preds, y_batch.to(device)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
 
-                loss = criterion(preds, torch.max(y_batch, dim=1).indices.to(device, dtype=torch.long)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
+                loss = criterion(preds, y_batch.to(device))
+                # loss = criterion(preds, torch.max(y_batch, dim=1).indices.to(device, dtype=torch.long)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -1161,7 +1265,8 @@ def train():
                 preds = model(x_batch.to(device)).detach() # (batch, species_id)
 
                 # preds = model(x_batch.to(device)).detach()
-                loss = criterion(preds.to(device), torch.max(y_batch, dim=1).indices.to(device, dtype=torch.long))
+                loss = criterion(preds.to(device), y_batch.to(device))
+                # loss = criterion(preds.to(device), torch.max(y_batch, dim=1).indices.to(device, dtype=torch.long))
 
                 preds = torch.sigmoid(preds)
                 # valid_preds[i * config.VALID_BATCH_NUM: (i+1) * config.VALID_BATCH_NUM] = preds.cpu().numpy()
@@ -1355,6 +1460,10 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
 
         
 print('finished!')
+
+
+# %%
+
 
 
 # %%
