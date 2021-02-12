@@ -6,7 +6,7 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "24"
+EXP_NUM = "25"
 EXP_TITLE = "BCE_NOAUG_MixUP"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
@@ -233,8 +233,8 @@ config = dict2({
     "weight_decay": 0,
     "t_max":              10,
     "TEST_SIZE":          0.2,
-    "MIXUP":              0.0,
-    "MIXUP_PROB":         -1,
+    "MIXUP":              0.5,
+    "MIXUP_PROB":         0.6,
     "SPEC_PROB":          -1,
     "spec_time_w":        0,
     "spec_time_stripes":  0,
@@ -603,7 +603,7 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
         wavnp = np.load(Path('../input//rfcx-species-audio-detection/train_mel/' + str(self.ids[idx]) + '.npy'))
 
         # transform
-        wavnp = train_transform(wavnp)
+        # wavnp = train_transform(wavnp)
         
         if randomCropOffset >= 0:
             wavnp = wavnp[0 + randomCropOffset: (10 * params.sr) + randomCropOffset]
@@ -1211,12 +1211,12 @@ def train():
                 # forward
                 preds = model(x_batch.to(device))
 
-                # if dice < config.MIXUP_PROB:
-                #     loss = mixup_criterion(criterion, preds, y_batch.to(device), y_batch_b.to(device), lam)
-                # else:
-                #     loss = criterion(preds, y_batch.to(device)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
+                if dice < config.MIXUP_PROB:
+                    loss = mixup_criterion(criterion, preds, y_batch.to(device), y_batch_b.to(device), lam)
+                else:
+                    loss = criterion(preds, y_batch.to(device)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
 
-                loss = criterion(preds, y_batch.to(device))
+                # loss = criterion(preds, y_batch.to(device))
                 # loss = criterion(preds, torch.max(y_batch, dim=1).indices.to(device, dtype=torch.long)) # It dosen't need Sigmoid, because BCE includes sigmoid function.
 
                 optimizer.zero_grad()
@@ -1397,7 +1397,8 @@ for fold in range(config.N_FOLDS):
 
 # %%
 # write submission
-with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
+# with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
+with open('submission_' + EXP_NAME + '_sum.csv', 'w', newline='') as csvfile:
     print('submission_' + EXP_NAME + '.csv')
     submission_writer = csv.writer(csvfile, delimiter=',')
     submission_writer.writerow(['recording_id','s0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11',
@@ -1441,8 +1442,10 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
                 outputs.append(output[0].cpu().detach().numpy().tolist())
             # outputs S= m(X_test_batch)
             maxed_output = torch.max(torch.from_numpy(np.array(outputs)).float(), dim=0) # max about batch clips
+            # maxed_output = torch.sum(torch.from_numpy(np.array(outputs)).float(), dim=0) # max about batch clips
             # maxed_output = torch.max(outputs, dim=0) # max about batch clips
             maxed_output = maxed_output.values.cpu().detach()
+            # maxed_output = maxed_output.cpu().detach()
             output_list.append(maxed_output)
         avg_maxed_output = torch.mean(torch.stack(output_list), dim=0)
         
@@ -1463,7 +1466,7 @@ print('finished!')
 
 
 # %%
-
+maxed_output
 
 
 # %%
