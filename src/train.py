@@ -7,7 +7,7 @@
 import os
 PROJECT = "RFCX"
 EXP_NUM = "27"
-EXP_TITLE = "NonMixNonAug"
+EXP_TITLE = "fullMultiLabel"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -214,6 +214,7 @@ config = dict2({
     # "SEQ_LEN":            int(sample.shape[1] * 0.8),
     # "DIM":                dim,
     # "ENC_LEN":            seq_len,
+    "MIX_LABEL":          0.8,
     "CLIP_LEN":           clip_len,
     "CLIP_DIM":           clip_dim,
     "ENC_CH":             ch,
@@ -506,16 +507,29 @@ label_transform = transforms.Compose([
 # Data load
 df_train_tp = pd.read_csv(config.TRAIN_TP_CSV)
 
+# create dictionary
+dic_rec_spec = {}
+for index, row in df_train_tp.iterrows():
+    if row["recording_id"] not in dic_rec_spec:
+        dic_rec_spec[row["recording_id"]] = [row["species_id"]]
+    else:
+        dic_rec_spec[row["recording_id"]].append(row["species_id"])
+dic_rec_spec["77299bde7"]
+
+
+# %%
 # add column per birds and flogs
 for col in range(24):
-    df_train_tp[col] = 0
+    df_train_tp[col] = 0.
 
 # one-hot encoding
 for index, row in df_train_tp.iterrows():
     specId = row["species_id"]
-    for col in range(24):
-        if int(specId) == col:
-            df_train_tp.iloc[index, df_train_tp.columns.get_loc(col)] = 1
+    df_train_tp.iloc[index, df_train_tp.columns.get_loc(specId)] = 1
+
+    for duplicateSpecId in dic_rec_spec[row["recording_id"]]:
+        if specId != duplicateSpecId:
+            df_train_tp.iloc[index, df_train_tp.columns.get_loc(duplicateSpecId)] = 1 * config.MIX_LABEL
 
 # grouping
 # df_train_tp = df_train_tp.groupby("recording_id", as_index=False).max()
@@ -652,8 +666,8 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
             wavnp = wavnp[len(wavnp) - (10 * params.sr) + randomCropOffset : len(wavnp) + randomCropOffset]
         wavnp = wav2mel(wavnp) # 10s clipping
 
-        aug= random.choice(self.augs)
-        wavnp = aug(wavnp)
+        # aug= random.choice(self.augs)
+        # wavnp = aug(wavnp)
 
         # dim, seq_len => seq_len, dim
         wavnp = wavnp.T
@@ -1441,8 +1455,8 @@ for fold in range(config.N_FOLDS):
 
 # %%
 # write submission
-# with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
-with open('submission_' + EXP_NAME + '_sum.csv', 'w', newline='') as csvfile:
+with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
+# with open('submission_' + EXP_NAME + '_sum.csv', 'w', newline='') as csvfile:
     print('submission_' + EXP_NAME + '.csv')
     submission_writer = csv.writer(csvfile, delimiter=',')
     submission_writer.writerow(['recording_id','s0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11',
