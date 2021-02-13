@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "25"
-EXP_TITLE = "BCE_NOAUG_MixUP"
+EXP_NUM = "27"
+EXP_TITLE = "NonMixNonAug"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -64,6 +64,11 @@ from torchsummary import summary
 from torchlibrosa.augmentation import SpecAugmentation
 import librosa.display
 from resnest.torch import resnest50
+from skimage.filters import gaussian
+from skimage.transform import resize
+from skimage.filters import gaussian
+from skimage.color import rgb2gray
+from skimage import exposure, util
 pd.set_option('display.max_columns', 50)
 pd.set_option('display.max_rows', 100)
 
@@ -233,8 +238,8 @@ config = dict2({
     "weight_decay": 0,
     "t_max":              10,
     "TEST_SIZE":          0.2,
-    "MIXUP":              0.5,
-    "MIXUP_PROB":         0.6,
+    "MIXUP":              0.0,
+    "MIXUP_PROB":         -1.0,
     "SPEC_PROB":          -1,
     "spec_time_w":        0,
     "spec_time_stripes":  0,
@@ -433,7 +438,36 @@ class VolumeControl(AudioTransform):
 
 
 # %%
+def horizontal_flip(img):
+    horizontal_flip_img = img[:, ::-1]
+    return horizontal_flip_img
 
+def vertical_flip(img):
+    vertical_flip_img = img[::-1, :]
+    return vertical_flip_img
+
+def addNoisy(img):
+    noise_img = util.random_noise(img)
+    return noise_img
+
+def contrast_stretching(img):
+    contrast_img = exposure.rescale_intensity(img)
+    return contrast_img
+
+def randomGaussian(img):
+    gaussian_img = gaussian(img)
+    return gaussian_img
+
+def grayScale(img):
+    gray_img = rgb2gray(img)
+    return gray_img
+
+def randomGamma(img):
+    img_gamma = exposure.adjust_gamma(img)
+    return img_gamma
+
+def nonAug(img):
+    return img
 
 # %% [markdown]
 # ## Transform
@@ -588,6 +622,13 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
         self.datanum = len(labels)   
         self.record_ids = record_ids
         self.offsets = offsets
+        self.augs = [
+            addNoisy,
+            contrast_stretching,
+            randomGaussian, 
+            randomGamma,
+            nonAug
+        ]
 
     def __len__(self):
         return self.datanum
@@ -610,6 +651,9 @@ class RainforestTrainDatasets(torch.utils.data.Dataset):
         else:
             wavnp = wavnp[len(wavnp) - (10 * params.sr) + randomCropOffset : len(wavnp) + randomCropOffset]
         wavnp = wav2mel(wavnp) # 10s clipping
+
+        aug= random.choice(self.augs)
+        wavnp = aug(wavnp)
 
         # dim, seq_len => seq_len, dim
         wavnp = wavnp.T
