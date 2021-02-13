@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "27"
-EXP_TITLE = "fullMultiLabel"
+EXP_NUM = "28"
+EXP_TITLE = "multilabel02"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -189,6 +189,10 @@ class dict2(dict):
 
 
 # %%
+1e-3
+
+
+# %%
 config = dict2({
     "fft":                2048,
     "hop":                512,
@@ -214,7 +218,7 @@ config = dict2({
     # "SEQ_LEN":            int(sample.shape[1] * 0.8),
     # "DIM":                dim,
     # "ENC_LEN":            seq_len,
-    "MIX_LABEL":          0.8,
+    "MIX_LABEL":          1.0,
     "CLIP_LEN":           clip_len,
     "CLIP_DIM":           clip_dim,
     "ENC_CH":             ch,
@@ -231,7 +235,7 @@ config = dict2({
     "VALID_BATCH_NUM":    20,
     "EPOCH_NUM":          30,
     "DROPOUT":            0.35,
-    "lr": 2e-4,
+    "lr": 1e-3,
     "momentum": 0.9,
     "gamma": 0.7,
     "betas": (0.9, 0.999),
