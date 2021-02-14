@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "28"
-EXP_TITLE = "multilabel02"
+EXP_NUM = "31"
+EXP_TITLE = "resnest"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -173,8 +173,14 @@ enc_dim = 10
 
 
 # %%
+torch.hub.list('zhanghang1989/ResNeSt', force_reload=True)
+
+
+# %%
 def get_model():
-    resnet_model = resnest50(pretrained=True)
+    # resnet_model = resnest50(pretrained=True)
+    # resnet_model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet34', pretrained=True)
+    resnet_model = torch.hub.load('zhanghang1989/ResNeSt', 'resnest101', pretrained=True)
     num_ftrs = resnet_model.fc.in_features
     resnet_model.fc = nn.Linear(num_ftrs, config.NUM_BIRDS)
     # resnet_model = resnet_model.to(device)
@@ -218,7 +224,7 @@ config = dict2({
     # "SEQ_LEN":            int(sample.shape[1] * 0.8),
     # "DIM":                dim,
     # "ENC_LEN":            seq_len,
-    "MIX_LABEL":          1.0,
+    "MIX_LABEL":          0.0,
     "CLIP_LEN":           clip_len,
     "CLIP_DIM":           clip_dim,
     "ENC_CH":             ch,
@@ -231,8 +237,8 @@ config = dict2({
     "POOL_STRIDE":        2,
     "NUM_BIRDS":          24,
     "N_FOLDS":            5,
-    "BATCH_NUM":          20,
-    "VALID_BATCH_NUM":    20,
+    "BATCH_NUM":          10,
+    "VALID_BATCH_NUM":    10,
     "EPOCH_NUM":          30,
     "DROPOUT":            0.35,
     "lr": 1e-3,
