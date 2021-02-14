@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "31"
-EXP_TITLE = "resnest"
+EXP_NUM = "32"
+EXP_TITLE = "resnest50"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -178,9 +178,9 @@ torch.hub.list('zhanghang1989/ResNeSt', force_reload=True)
 
 # %%
 def get_model():
-    # resnet_model = resnest50(pretrained=True)
+    resnet_model = resnest50(pretrained=True)
     # resnet_model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet34', pretrained=True)
-    resnet_model = torch.hub.load('zhanghang1989/ResNeSt', 'resnest101', pretrained=True)
+    # resnet_model = torch.hub.load('zhanghang1989/ResNeSt', 'resnest101', pretrained=True)
     num_ftrs = resnet_model.fc.in_features
     resnet_model.fc = nn.Linear(num_ftrs, config.NUM_BIRDS)
     # resnet_model = resnet_model.to(device)
@@ -237,8 +237,8 @@ config = dict2({
     "POOL_STRIDE":        2,
     "NUM_BIRDS":          24,
     "N_FOLDS":            5,
-    "BATCH_NUM":          10,
-    "VALID_BATCH_NUM":    10,
+    "BATCH_NUM":          22,
+    "VALID_BATCH_NUM":    22,
     "EPOCH_NUM":          30,
     "DROPOUT":            0.35,
     "lr": 1e-3,
@@ -319,6 +319,82 @@ spec_augmenter = SpecAugmentation(time_drop_width=config.spec_time_w, time_strip
 # ## Augment
 
 # %%
+# Data load
+df_train_tp = pd.read_csv(config.TRAIN_TP_CSV)
+
+duplicate_recids = df_train_tp.groupby("recording_id", as_index=False).count()[df_train_tp.groupby("recording_id", as_index=False).count().id > 1].recording_id.values
+
+specids = {}
+for index, row in df_train_tp.iterrows():
+    for duprecid in duplicate_recids:
+        if duprecid == row["recording_id"]:
+            if duprecid not in specids:
+                specids[duprecid] = []
+            specids[duprecid].append(row["species_id"])
+
+spec2spec = {}
+for i in range(24):
+    spec2spec[i] = []
+       
+for s in range(24):
+    for specs in specids.values():
+        if s in specs:
+            for spec in specs:
+                if s != spec:
+                    spec2spec[s].append(spec)
+display(spec2spec)
+
+def s2s(specid):
+    if len(spec2spec[specid]) > 0:
+        return np.random.choice(spec2spec[specid])
+    else:
+        return specid
+
+# print(s2s(3))
+# print(s2s(10))
+
+spec2id = {}
+for index, row in df_train_tp.iterrows():
+    if row["species_id"] not in spec2id:
+        spec2id[row["species_id"]] = []
+    spec2id[row["species_id"]].append(row["id"])
+
+def s2id(specid):
+    return np.random.choice(spec2id[specid])
+
+# print(spec2id[0])
+# print(s2id(0))
+
+
+# %%
+# # mixup
+# def mixup_data(x, y, alpha=1.0, use_cuda=True):
+
+#     '''Compute the mixup data. Return mixed inputs, pairs of targets, and lambda'''
+#     if alpha > 0.:
+#         lam = np.random.beta(alpha, alpha)
+#     else:
+#         lam = 1.
+#     batch_size = x.size()[0]
+#     if use_cuda:
+#         index = torch.randperm(batch_size).cuda()
+#     else:
+#         index = torch.randperm(batch_size)
+#     # lam = max(lam, 1 - lam)
+#     mixed_x = lam * x + (1 - lam) * x[index,:]
+#     # mixed_y = lam * y + (1 - lam) * y[index]
+#     y_a, y_b = y, y[index]
+#     # return mixed_x, mixed_y
+#     return mixed_x, y_a, y_b, lam
+
+# # def mixup_criterion(y_a, y_b, lam):
+# #     return lambda criterion, pred: lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
+# def mixup_criterion(criterion, pred, y_a, y_b, lam):
+#     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
+
+# %%
 # mixup
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
 
@@ -328,10 +404,13 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
     else:
         lam = 1.
     batch_size = x.size()[0]
-    if use_cuda:
-        index = torch.randperm(batch_size).cuda()
-    else:
-        index = torch.randperm(batch_size)
+
+
+    specids = torch.max(y, dim=1).detach.cpu().numpy()
+    for specid in specids:
+        
+
+
     # lam = max(lam, 1 - lam)
     mixed_x = lam * x + (1 - lam) * x[index,:]
     # mixed_y = lam * y + (1 - lam) * y[index]
