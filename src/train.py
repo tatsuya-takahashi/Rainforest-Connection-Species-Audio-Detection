@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "34"
-EXP_TITLE = "relativemixup1Retry"
+EXP_NUM = "36"
+EXP_TITLE = "FocusOnFreq"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -96,10 +96,14 @@ print(device)
 # 5get length
 class params:
     sr = 48000
-    n_mels = 320
+    # n_mels = 320
+    n_mels = 128
+    # n_mels = 640
     fmin = 40
     fmax = sr // 2
-    fft = 2048
+    # fft = 2048
+    fft = 1024
+    # fft = 4096
     hop = 512
     clip_frame = 10 * 48000
     augnum = 100
@@ -200,10 +204,10 @@ class dict2(dict):
 
 # %%
 config = dict2({
-    "fft":                2048,
-    "hop":                512,
-    "sr":                 48000,
-    "mel":                320,
+    "fft":                params.fft,
+    "hop":                params.hop,
+    "sr":                 params.sr,
+    "mel":                params.n_mels,
     "SEED":               42,
     # "INPUT":              Path("../input/rfcx-species-audio-detection/train"),
     # "TRAIN_AUDIO_ROOT":   Path("../input/rfcx-species-audio-detection/train_mel_clip_aug/"),
@@ -213,7 +217,8 @@ config = dict2({
     # "SUB":                Path("../input/rfcx-species-audio-detection/sample_submission.csv"),
     "TEST_AUDIO_FLAC":    Path("../input/rfcx-species-audio-detection/test"),
     "TRAIN_AUDIO_ROOT":   Path("e:/002_datasets/000_RFCX/train_mel_clip_aug/"),
-    "TEST_AUDIO_ROOT":    Path("../input/rfcx-species-audio-detection/test_mel"),
+    "TEST_AUDIO_ROOT":    Path("../input/rfcx-species-audio-detection/test_mel_time"),
+    # "TEST_AUDIO_ROOT":    Path("e:/002_datasets/000_RFCX/valid_mel_clip/test_mel"),
     "VALID_AUDIO_ROOT":   Path("e:/002_datasets/000_RFCX/valid_mel_clip/"),
     "TRAIN_TP":           Path("../input/rfcx-species-audio-detection/train_tp.csv"),
     "TRAIN_TP_CSV":       Path("../input/rfcx-species-audio-detection/train_tp_mel.csv"),
@@ -249,9 +254,9 @@ config = dict2({
     "weight_decay": 0,
     "t_max":              10,
     "TEST_SIZE":          0.2,
-    "MIXUP":              0.5,
-    "MIXUP_PROB":         0.6,
-    "SPEC_PROB":          0.0,
+    "MIXUP":              0.0,
+    "MIXUP_PROB":         -1.0,
+    "SPEC_PROB":          -1.0,
     "spec_time_w":        0,
     "spec_time_stripes":  0,
     "spec_freq_w":        0,
@@ -1524,30 +1529,36 @@ def train():
 result = train()
 print(result)
 
+
+# %%
+pd.DataFrame(result).to_csv('best_lwlrap.csv', index=False)
+df = pd.read_csv('best_lwlrap.csv')
+df.head()
+
 # %% [markdown]
 # ### Folds Analytics
 
 # %%
-# calc lwlrap
-train_batch_labels = np.load("./train_batch_labels.npy")
-train_batch_preds = np.load("./train_batch_preds.csv.npy")
-# extrct under < 1.0
-valid_batch_labels = np.load("./valid_batch_labels.npy")
-valid_batch_preds = np.load("./valid_batch_preds.csv.npy")
+# # calc lwlrap
+# train_batch_labels = np.load("./train_batch_labels.npy")
+# train_batch_preds = np.load("./train_batch_preds.csv.npy")
+# # extrct under < 1.0
+# valid_batch_labels = np.load("./valid_batch_labels.npy")
+# valid_batch_preds = np.load("./valid_batch_preds.csv.npy")
 
 
-# 
-print(train_batch_labels.shape)
-print(train_batch_labels[0])
+# # 
+# print(train_batch_labels.shape)
+# print(train_batch_labels[0])
 
-print(train_batch_preds.shape)
-print(train_batch_preds[0])
+# print(train_batch_preds.shape)
+# print(train_batch_preds[0])
 
-print(valid_batch_labels.shape)
-print(valid_batch_labels[0])
+# print(valid_batch_labels.shape)
+# print(valid_batch_labels[0])
 
-print(valid_batch_preds.shape)
-print(valid_batch_preds[0])
+# print(valid_batch_preds.shape)
+# print(valid_batch_preds[0])
 
 
 # %%
@@ -1583,8 +1594,14 @@ for fold in range(config.N_FOLDS):
 
 
 # %%
+model_preds = {}
+for fold in range(config.N_FOLDS):
+    model_preds[fold] = []
+
+
+# %%
 # write submission
-with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
+with open('../output/submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
 # with open('submission_' + EXP_NAME + '_sum.csv', 'w', newline='') as csvfile:
     print('submission_' + EXP_NAME + '.csv')
     submission_writer = csv.writer(csvfile, delimiter=',')
@@ -1595,7 +1612,7 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
     
     # Every test file is split on several chunks and prediction is made for each chunk
     for i in tqdm(range(0, len(test_files))):
-    # for i in range(0, 1):
+    # for i in range(0, 2):
         # read data
         # X_test = torch.from_numpy(np.load(os.path.join(config.TEST_AUDIO_ROOT, test_files[i])))
 
@@ -1622,7 +1639,7 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
 
         # predict
         output_list = []
-        for m in models:
+        for fold, (m) in enumerate(models):
             outputs = []
             for x_b in X_test_batch:
                 output = m(torch.stack([x_b]))
@@ -1634,6 +1651,10 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
             maxed_output = maxed_output.values.cpu().detach()
             # maxed_output = maxed_output.cpu().detach()
             output_list.append(maxed_output)
+
+            # each fold preds
+            model_preds[fold].append(maxed_output.numpy())
+
         avg_maxed_output = torch.mean(torch.stack(output_list), dim=0)
         
         file_id = str.split(test_files[i], '.')[0]
@@ -1648,32 +1669,12 @@ with open('submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
         if i % 100 == 0 and i > 0:
             print('Predicted for ' + str(i) + ' of ' + str(len(test_files) + 1) + ' files')
 
-        
+
 print('finished!')
 
 
 # %%
-maxed_output
-
-
-# %%
-print(9)
-
-
-# %%
-target = torch.empty(3, dtype=torch.long).random_(5)
-target
-
-
-# %%
-input = torch.randn(3, 5, requires_grad=True)
-input
-
-
-# %%
-a = torch.randn(3, 5)
-print(a)
-torch.max(a, dim=1).indices
+np.array(model_preds[0]).shape
 
 
 # %%
