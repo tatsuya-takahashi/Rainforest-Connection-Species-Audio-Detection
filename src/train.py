@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "32"
-EXP_TITLE = "resnest50"
+EXP_NUM = "34"
+EXP_TITLE = "relativemixup1Retry"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -249,9 +249,9 @@ config = dict2({
     "weight_decay": 0,
     "t_max":              10,
     "TEST_SIZE":          0.2,
-    "MIXUP":              0.0,
-    "MIXUP_PROB":         -1.0,
-    "SPEC_PROB":          -1,
+    "MIXUP":              0.5,
+    "MIXUP_PROB":         0.6,
+    "SPEC_PROB":          0.0,
     "spec_time_w":        0,
     "spec_time_stripes":  0,
     "spec_freq_w":        0,
@@ -367,6 +367,37 @@ def s2id(specid):
 
 
 # %%
+def idx2mel(idx):
+        out_label = labels[idx]
+
+        # random crop
+        randomCropOffset = int((int(np.random.rand() * offsets[idx])))
+
+        # load wav
+        wavnp = np.load(Path('../input//rfcx-species-audio-detection/train_mel/' + str(ids[idx]) + '.npy'))
+        
+        if randomCropOffset >= 0:
+            wavnp = wavnp[0 + randomCropOffset: (10 * params.sr) + randomCropOffset]
+        else:
+            wavnp = wavnp[len(wavnp) - (10 * params.sr) + randomCropOffset : len(wavnp) + randomCropOffset]
+        wavnp = wav2mel(wavnp) # 10s clipping
+
+        # aug= random.choice(self.augs)
+        # wavnp = aug(wavnp)
+
+        # dim, seq_len => seq_len, dim
+        wavnp = wavnp.T
+
+        # add channel
+        wavnp = np.stack([wavnp, wavnp, wavnp])
+
+        # to Tensor
+        # wavTensor = torch.from_numpy(wavnp).float()
+
+        return wavnp, out_label
+
+
+# %%
 # # mixup
 # def mixup_data(x, y, alpha=1.0, use_cuda=True):
 
@@ -406,15 +437,24 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
     batch_size = x.size()[0]
 
 
-    specids = torch.max(y, dim=1).detach.cpu().numpy()
-    for specid in specids:
+    specids = torch.max(y, dim=1).values.numpy()
+    mix_xs = []
+    mix_labels = []
+    for i, (specid) in enumerate(specids):
+        mixspecid = s2s(specid)
+        if mixspecid != specid:
+            mixid = s2id(mixspecid)
+            mix_x, mix_label = idx2mel(mixid)
+            mix_xs.append(mix_x)
+            mix_labels.append(mix_label)
+        else:
+            mix_xs.append(x[i].numpy())
+            mix_labels.append(y[i])
         
-
-
     # lam = max(lam, 1 - lam)
-    mixed_x = lam * x + (1 - lam) * x[index,:]
+    mixed_x = lam * x + (1 - lam) * torch.from_numpy(np.array(mix_xs)).float()
     # mixed_y = lam * y + (1 - lam) * y[index]
-    y_a, y_b = y, y[index]
+    y_a, y_b = y, torch.from_numpy(np.array(mix_labels))
     # return mixed_x, mixed_y
     return mixed_x, y_a, y_b, lam
 
