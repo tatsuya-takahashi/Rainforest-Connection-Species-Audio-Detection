@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "36"
-EXP_TITLE = "FocusOnFreq"
+EXP_NUM = "40"
+EXP_TITLE = "bagging1_spec10"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -96,13 +96,13 @@ print(device)
 # 5get length
 class params:
     sr = 48000
-    # n_mels = 320
-    n_mels = 128
+    n_mels = 320
+    # n_mels = 128
     # n_mels = 640
     fmin = 40
     fmax = sr // 2
-    # fft = 2048
-    fft = 1024
+    fft = 2048
+    # fft = 1024
     # fft = 4096
     hop = 512
     clip_frame = 10 * 48000
@@ -217,7 +217,9 @@ config = dict2({
     # "SUB":                Path("../input/rfcx-species-audio-detection/sample_submission.csv"),
     "TEST_AUDIO_FLAC":    Path("../input/rfcx-species-audio-detection/test"),
     "TRAIN_AUDIO_ROOT":   Path("e:/002_datasets/000_RFCX/train_mel_clip_aug/"),
-    "TEST_AUDIO_ROOT":    Path("../input/rfcx-species-audio-detection/test_mel_time"),
+    "TEST_AUDIO_ROOT":    Path("../input/rfcx-species-audio-detection/test_mel"),
+    "TEST_AUDIO_ROOT_MIN":    Path("e:/002_datasets/000_RFCX/valid_mel_clip/test_mel_min"),
+    # "TEST_AUDIO_ROOT":    Path("../input/rfcx-species-audio-detection/test_mel_freq"),
     # "TEST_AUDIO_ROOT":    Path("e:/002_datasets/000_RFCX/valid_mel_clip/test_mel"),
     "VALID_AUDIO_ROOT":   Path("e:/002_datasets/000_RFCX/valid_mel_clip/"),
     "TRAIN_TP":           Path("../input/rfcx-species-audio-detection/train_tp.csv"),
@@ -244,7 +246,7 @@ config = dict2({
     "N_FOLDS":            5,
     "BATCH_NUM":          22,
     "VALID_BATCH_NUM":    22,
-    "EPOCH_NUM":          30,
+    "EPOCH_NUM":          50,
     "DROPOUT":            0.35,
     "lr": 1e-3,
     "momentum": 0.9,
@@ -256,7 +258,7 @@ config = dict2({
     "TEST_SIZE":          0.2,
     "MIXUP":              0.0,
     "MIXUP_PROB":         -1.0,
-    "SPEC_PROB":          -1.0,
+    "SPEC_PROB":          1.0,
     "spec_time_w":        0,
     "spec_time_stripes":  0,
     "spec_freq_w":        0,
@@ -1600,10 +1602,28 @@ for fold in range(config.N_FOLDS):
 
 
 # %%
+predict_min = True
+
+
+# %%
+if predict_min == True:
+    audio_root = config.TEST_AUDIO_ROOT_MIN
+    filename = '../output/submission_' + EXP_NAME + '_min.csv'
+    dev_num = 51
+else:
+    audio_root = config.TEST_AUDIO_ROOT
+    filename = '../output/submission_' + EXP_NAME + '.csv' 
+    dev_num = 6
+print(audio_root)
+print(filename)
+print(dev_num)  
+
+
+# %%
 # write submission
-with open('../output/submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfile:
+with open(filename, 'w', newline='') as csvfile:
 # with open('submission_' + EXP_NAME + '_sum.csv', 'w', newline='') as csvfile:
-    print('submission_' + EXP_NAME + '.csv')
+    print(filename)
     submission_writer = csv.writer(csvfile, delimiter=',')
     submission_writer.writerow(['recording_id','s0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11',
                                's12','s13','s14','s15','s16','s17','s18','s19','s20','s21','s22','s23'])
@@ -1620,14 +1640,10 @@ with open('../output/submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfi
         # X_test = np.load(os.path.join(config.TEST_AUDIO_ROOT, test_files[i]))
         X_test_batch = []
 
-        # muptiply number
-        # TODO: 51 is magic number. You have to rewrite 51 to vars.
-        dev_num = 6
-
         # Cutting!
-        for idx in range(dev_num):
+        for idx in tqdm(range(dev_num)):
             recId =  test_files[i].split('.')[0]
-            X_test = np.load(os.path.join(config.TEST_AUDIO_ROOT, recId + '_' + str(idx) + '.npy')) # (DIM, seq_len)
+            X_test = np.load(os.path.join(audio_root, recId + '_' + str(idx) + '.npy')) # (DIM, seq_len)
             X_test_clip = X_test.T # (seq_len, DIM)
             # X_test_clip = X_test_clip[np.newaxis, :, :] # add fake channel
             X_test_clip = np.stack([X_test_clip, X_test_clip, X_test_clip]) # expand to channel
@@ -1671,10 +1687,6 @@ with open('../output/submission_' + EXP_NAME + '.csv', 'w', newline='') as csvfi
 
 
 print('finished!')
-
-
-# %%
-np.array(model_preds[0]).shape
 
 
 # %%
