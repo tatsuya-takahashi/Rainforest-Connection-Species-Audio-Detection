@@ -6,8 +6,8 @@
 # %%
 import os
 PROJECT = "RFCX"
-EXP_NUM = "40"
-EXP_TITLE = "bagging1_spec10"
+EXP_NUM = "43"
+EXP_TITLE = "baggin_spec10_epoch50_seed32"
 EXP_NAME = "exp_" + EXP_NUM + "_" + EXP_TITLE
 IS_WRITRE_LOG = True
 os.environ['WANDB_NOTEBOOK_NAME'] = 'train_clip'
@@ -208,7 +208,9 @@ config = dict2({
     "hop":                params.hop,
     "sr":                 params.sr,
     "mel":                params.n_mels,
-    "SEED":               42,
+    "SEED":               32,
+    "SPEC_PROB":          1.0,
+    "EPOCH_NUM":          50,
     # "INPUT":              Path("../input/rfcx-species-audio-detection/train"),
     # "TRAIN_AUDIO_ROOT":   Path("../input/rfcx-species-audio-detection/train_mel_clip_aug/"),
     # "TEST_AUDIO_ROOT":    Path"../input/rfcx-species-audio-detection/train_mel_clip_aug/0_0.pt"),
@@ -218,7 +220,7 @@ config = dict2({
     "TEST_AUDIO_FLAC":    Path("../input/rfcx-species-audio-detection/test"),
     "TRAIN_AUDIO_ROOT":   Path("e:/002_datasets/000_RFCX/train_mel_clip_aug/"),
     "TEST_AUDIO_ROOT":    Path("../input/rfcx-species-audio-detection/test_mel"),
-    "TEST_AUDIO_ROOT_MIN":    Path("e:/002_datasets/000_RFCX/valid_mel_clip/test_mel_min"),
+    "TEST_AUDIO_ROOT_MIN":    Path("e:/002_datasets/000_RFCX/test_mel_min"),
     # "TEST_AUDIO_ROOT":    Path("../input/rfcx-species-audio-detection/test_mel_freq"),
     # "TEST_AUDIO_ROOT":    Path("e:/002_datasets/000_RFCX/valid_mel_clip/test_mel"),
     "VALID_AUDIO_ROOT":   Path("e:/002_datasets/000_RFCX/valid_mel_clip/"),
@@ -246,7 +248,6 @@ config = dict2({
     "N_FOLDS":            5,
     "BATCH_NUM":          22,
     "VALID_BATCH_NUM":    22,
-    "EPOCH_NUM":          50,
     "DROPOUT":            0.35,
     "lr": 1e-3,
     "momentum": 0.9,
@@ -258,7 +259,6 @@ config = dict2({
     "TEST_SIZE":          0.2,
     "MIXUP":              0.0,
     "MIXUP_PROB":         -1.0,
-    "SPEC_PROB":          1.0,
     "spec_time_w":        0,
     "spec_time_stripes":  0,
     "spec_freq_w":        0,
@@ -1530,10 +1530,10 @@ def train():
 # %%
 result = train()
 print(result)
+pd.DataFrame(result).to_csv('best_lwlrap.csv', index=False)
 
 
 # %%
-pd.DataFrame(result).to_csv('best_lwlrap.csv', index=False)
 df = pd.read_csv('best_lwlrap.csv')
 df.head()
 
@@ -1602,7 +1602,7 @@ for fold in range(config.N_FOLDS):
 
 
 # %%
-predict_min = True
+predict_min = False
 
 
 # %%
@@ -1618,6 +1618,8 @@ print(audio_root)
 print(filename)
 print(dev_num)  
 
+# %% [markdown]
+# ## Prediction
 
 # %%
 # write submission
@@ -1641,7 +1643,7 @@ with open(filename, 'w', newline='') as csvfile:
         X_test_batch = []
 
         # Cutting!
-        for idx in tqdm(range(dev_num)):
+        for idx in range(dev_num):
             recId =  test_files[i].split('.')[0]
             X_test = np.load(os.path.join(audio_root, recId + '_' + str(idx) + '.npy')) # (DIM, seq_len)
             X_test_clip = X_test.T # (seq_len, DIM)
